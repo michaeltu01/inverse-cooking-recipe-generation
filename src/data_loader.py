@@ -8,7 +8,6 @@ import nltk
 from PIL import Image
 from build_vocab import Vocabulary
 import random
-import json
 import lmdb
 
 
@@ -18,7 +17,7 @@ class EpicuriousDataset(data.Dataset):
                  transform=None, max_num_samples=-1, use_lmdb=False, suff=''):
         
         """
-        Initializes the Recipe1MDataset class.
+        Initializes the EpicuriousDataset class.
 
         Args:
             data_dir (str): Directory containing image data.
