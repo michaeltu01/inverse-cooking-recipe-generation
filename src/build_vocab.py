@@ -148,11 +148,7 @@ def build_vocab_recipe1m(args):
     print ("Loading data...")
     ## TODO: Load data from CSV into pickle files
 
-    
     ...
-
-    print("Loaded data.")
-    print("Found %d recipes in the dataset." % (len(layer1)))
 
     ingrs_file = args.save_path + 'allingrs_count.pkl'
     instrs_file = args.save_path + 'allwords_count.pkl'
@@ -216,7 +212,6 @@ def build_vocab_recipe1m(args):
         pickle.dump(counter_toks, open(args.save_path + 'allwords_count.pkl', 'wb'))
         pickle.dump(counter_ingrs_raw, open(args.save_path + 'allingrs_raw_count.pkl', 'wb'))
 
-    # TODO: Make sure that this aligns with our current data
     # manually add missing entries for better clustering
     base_words = ['peppers', 'tomato', 'spinach_leaves', 'turkey_breast', 'lettuce_leaf',
                   'chicken_thighs', 'milk_powder', 'bread_crumbs', 'onion_flakes',
