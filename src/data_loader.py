@@ -1,7 +1,9 @@
+# Use `pip install [library name]` in the conda environement to install these libraries
+
 import tensorflow as tf
 import numpy as np
 import os
-import tensorflow.data as data
+from tensorflow import data
 import nltk
 from PIL import Image
 from build_vocab import Vocabulary
@@ -10,22 +12,42 @@ import json
 import lmdb
 
 
-class Recipe1MDataset(data.Dataset):
+class EpicuriousDataset(data.Dataset):
 
     def __init__(self, data_dir, aux_data_dir, split, maxseqlen, maxnuminstrs, maxnumlabels, maxnumims,
                  transform=None, max_num_samples=-1, use_lmdb=False, suff=''):
+        
+        """
+        Initializes the Recipe1MDataset class.
 
+        Args:
+            data_dir (str): Directory containing image data.
+            aux_data_dir (str): Directory containing auxiliary data.
+            split (str): Dataset split (train/val/test).
+            maxseqlen (int): Maximum sequence length.
+            maxnuminstrs (int): Maximum number of instructions.
+            maxnumlabels (int): Maximum number of labels.
+            maxnumims (int): Maximum number of images.
+            transform (torchvision.transforms.Transform): Image transformation.
+            max_num_samples (int): Maximum number of samples to load (-1 means load all).
+            use_lmdb (bool): Whether to use LMDB for image loading.
+            suff (str): Suffix for auxiliary data files.
+        """
+
+        ## TODO: Load data from aux_data_dir. Use suff to help with this.
         self.ingrs_vocab = ... 
         self.instrs_vocab = ...
         self.dataset = ...
 
         self.label2word = self.get_ingrs_vocab()
 
+        # TODO: If a lambda function is provided, ensure that it is run correctly.
         self.use_lmdb = use_lmdb
         if use_lmdb:
             self.image_file = lmdb.open(os.path.join(aux_data_dir, 'lmdb_' + split), max_readers=1, readonly=True,
                                         lock=False, readahead=False, meminit=False)
 
+        # TODO: Keep only the entries in the dataset that contain an image.
         self.ids = []
         self.split = split
         for i, entry in enumerate(self.dataset):
@@ -33,6 +55,7 @@ class Recipe1MDataset(data.Dataset):
                 continue
             self.ids.append(i)
 
+        # TODO: Check that these instance variables are initialized properly.
         self.root = os.path.join(data_dir, 'images', split)
         self.transform = transform
         self.max_num_labels = maxnumlabels
@@ -60,6 +83,7 @@ class Recipe1MDataset(data.Dataset):
     def __getitem__(self, index):
         """Returns one data pair (image and caption)."""
 
+        # Get the sample from the dataset using the index
         sample = self.dataset[self.ids[index]]
         img_id = sample['id']
         captions = sample['tokenized']
@@ -67,24 +91,30 @@ class Recipe1MDataset(data.Dataset):
 
         idx = index
 
+        # Get the labels (ingredients) and title of the recipe
         labels = self.dataset[self.ids[idx]]['ingredients']
         title = sample['title']
 
+        # Initialize tokens with the title and a separator
         tokens = []
         tokens.extend(title)
-        # add fake token to separate title from recipe
-        tokens.append('<eoi>')
+        tokens.append('<eoi>') # add fake token to separate title from recipe
+
+        # Extend tokens with the captions and a separator
         for c in captions:
             tokens.extend(c)
             tokens.append('<eoi>')
 
+        # Initialize ground truth labels with padding
         ilabels_gt = np.ones(self.max_num_labels) * self.ingrs_vocab('<pad>')
         pos = 0
 
+        # Convert ingredient labels to indices
         true_ingr_idxs = []
         for i in range(len(labels)):
             true_ingr_idxs.append(self.ingrs_vocab(labels[i]))
 
+        # Populate ground truth labels with ingredient indices
         for i in range(self.max_num_labels):
             if i >= len(labels):
                 label = '<pad>'
@@ -95,12 +125,13 @@ class Recipe1MDataset(data.Dataset):
                 ilabels_gt[pos] = label_idx
                 pos += 1
 
+        # Mark the end of the ground truth labels
         ilabels_gt[pos] = self.ingrs_vocab('<end>')
-        ingrs_gt = torch.from_numpy(ilabels_gt).long()
+        ingrs_gt = tf.from_numpy(ilabels_gt).long()
 
         if len(paths) == 0:
             path = None
-            image_input = torch.zeros((3, 224, 224))
+            image_input = tf.zeros((3, 224, 224))
         else:
             if self.split == 'train':
                 img_idx = np.random.randint(0, len(paths))
@@ -131,7 +162,7 @@ class Recipe1MDataset(data.Dataset):
         caption.append(self.instrs_vocab('<end>'))
 
         caption = caption[0:self.maxseqlen]
-        target = torch.Tensor(caption)
+        target = tf.Tensor(caption)
 
         return image_input, target, ingrs_gt, img_id, path, self.instrs_vocab('<pad>')
 
