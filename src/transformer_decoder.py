@@ -105,7 +105,7 @@ class SinusoidalPositionalEmbedding(tf.keras.layers.Layer):
 
         if incremental_state is not None:
             # positions is the same for every token when decoding a single step
-            return tf.tile(self.weights[self.padding_idx + seq_len, tf.newaxis, :], [tf.shape(inputs)[0], 1, 1])
+            return tf.tile(self.weights[self.padding_idx + seq_len, tf.newaxis, :], [tf.shape(input)[0], 1, 1])
 
         positions = make_positions(tf.cast(input, tf.int32), self.padding_idx, self.left_pad)
         return tf.gather(self.weights, positions)
@@ -114,7 +114,7 @@ class SinusoidalPositionalEmbedding(tf.keras.layers.Layer):
         """Maximum number of supported positions."""
         return int(1e5)  # an arbitrary large number
 
-class TransformerDecoderLayer(nn.Module):
+class TransformerDecoderLayer(tf.keras.layers.Layer):
     """Decoder layer block."""
 
     def __init__(self, embed_dim, n_att, dropout=0.5, normalize_before=True, last_ln=False):
@@ -124,7 +124,6 @@ class TransformerDecoderLayer(nn.Module):
         self.dropout = dropout
         self.relu_dropout = dropout
         self.normalize_before = normalize_before
-        num_layer_norm = 3
 
         # self-attention on generated recipe
         self.self_attn = MultiheadAttention(
@@ -137,12 +136,13 @@ class TransformerDecoderLayer(nn.Module):
             dropout=dropout,
         )
 
-        self.fc1 = Linear(self.embed_dim, self.embed_dim)
-        self.fc2 = Linear(self.embed_dim, self.embed_dim)
-        self.layer_norms = nn.ModuleList([LayerNorm(self.embed_dim) for i in range(num_layer_norm)])
+        self.fc1 = tf.keras.layers.Dense(self.embed_dim, activation='relu')
+        self.fc2 = tf.keras.layers.Dense(self.embed_dim)
+        self.layer_norms = [tf.keras.layers.LayerNormalization(epsilon=1e-5) for i in range(3)]
+
         self.use_last_ln = last_ln
         if self.use_last_ln:
-            self.last_ln = LayerNorm(self.embed_dim)
+            self.last_ln = tf.keras.layers.LayerNormalization(epsilon=1e-5)
 
     def forward(self, x, ingr_features, ingr_mask, incremental_state, img_features):
 
@@ -157,7 +157,8 @@ class TransformerDecoderLayer(nn.Module):
             incremental_state=incremental_state,
             need_weights=False,
         )
-        x = F.dropout(x, p=self.dropout, training=self.training)
+        dropout_layer = tf.keras.layers.Dropout(self.dropout)
+        x = dropout_layer(x, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
 
@@ -186,9 +187,9 @@ class TransformerDecoderLayer(nn.Module):
 
         else:
             # attention on concatenation of encoder_out and encoder_aux, query self attn (x)
-            kv = torch.cat((img_features, ingr_features), 0)
-            mask = torch.cat((torch.zeros(img_features.shape[1], img_features.shape[0], dtype=torch.uint8).to(device),
-                              ingr_mask), 1)
+            kv = tf.concat((img_features, ingr_features), axis=0)
+            mask = tf.concat([tf.zeros((img_features.shape[1], img_features.shape[0]), dtype=tf.int32), ingr_mask], axis=1)
+            attn_output = self.cond_att(x, kv, kv, attention_mask=mask)
             x, _ = self.cond_att(query=x,
                                     key=kv,
                                     value=kv,
@@ -196,16 +197,16 @@ class TransformerDecoderLayer(nn.Module):
                                     incremental_state=incremental_state,
                                     static_kv=True,
             )
-        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = dropout_layer(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(1, x, after=True)
 
         residual = x
         x = self.maybe_layer_norm(-1, x, before=True)
-        x = F.relu(self.fc1(x))
-        x = F.dropout(x, p=self.relu_dropout, training=self.training)
+        x = self.fc1(x)
+        x = dropout_layer(x, training=self.training)
         x = self.fc2(x)
-        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = dropout_layer(x, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(-1, x, after=True)
 
