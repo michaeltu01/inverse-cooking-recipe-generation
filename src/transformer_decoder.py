@@ -222,35 +222,25 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         else:
             return x
 
-class DecoderTransformer(nn.Module):
+class DecoderTransformer(tf.keras.Module):
     """Transformer decoder."""
 
     def __init__(self, embed_size, vocab_size, dropout=0.5, seq_length=20, num_instrs=15,
                  attention_nheads=16, pos_embeddings=True, num_layers=8, learned=True, normalize_before=True,
                  normalize_inputs=False, last_ln=False, scale_embed_grad=False):
         super(DecoderTransformer, self).__init__()
-        self.dropout = dropout
+        self.dropout = tf.keras.layers.Dropout(dropout)
         self.seq_length = seq_length * num_instrs
-        self.embed_tokens = nn.Embedding(vocab_size, embed_size, padding_idx=vocab_size-1,
-                                         scale_grad_by_freq=scale_embed_grad)
-        nn.init.normal_(self.embed_tokens.weight, mean=0, std=embed_size ** -0.5)
+        self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5))
+        self.final_ln = tf.keras.layers.LayerNormalization()
         if pos_embeddings:
             self.embed_positions = PositionalEmbedding(1024, embed_size, 0, left_pad=False, learned=learned)
         else:
             self.embed_positions = None
         self.normalize_inputs = normalize_inputs
-        if self.normalize_inputs:
-            self.layer_norms_in = nn.ModuleList([LayerNorm(embed_size) for i in range(3)])
-
         self.embed_scale = math.sqrt(embed_size)
-        self.layers = nn.ModuleList([])
-        self.layers.extend([
-            TransformerDecoderLayer(embed_size, attention_nheads, dropout=dropout, normalize_before=normalize_before,
-                                    last_ln=last_ln)
-            for i in range(num_layers)
-        ])
-
-        self.linear = Linear(embed_size, vocab_size-1)
+        self.layers = [TransformerDecoderLayer(embed_size, attention_nheads, dropout, normalize_before, last_ln) for _ in range(num_layers)]
+        self.linear = tf.keras.layers.Dense(vocab_size)
 
     def forward(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None):
 
@@ -286,7 +276,7 @@ class DecoderTransformer(nn.Module):
         if self.normalize_inputs:
             x = self.layer_norms_in[2](x)
 
-        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = tf.keras.layers.Dropout(self.dropout)(x, training=self.training)
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
@@ -304,7 +294,7 @@ class DecoderTransformer(nn.Module):
         x = x.transpose(0, 1)
 
         x = self.linear(x)
-        _, predicted = x.max(dim=-1)
+        _, predicted = tf.argmax(axis=-1)
 
         return x, predicted
 
@@ -315,10 +305,7 @@ class DecoderTransformer(nn.Module):
         incremental_state = {}
 
         # create dummy previous word
-        if ingr_features is not None:
-            fs = ingr_features.size(0)
-        else:
-            fs = img_features.size(0)
+        fs = tf.shape(ingr_features)[0] if ingr_features is not None else tf.shape(img_features)[0]
 
         if beam != -1:
             if fs == 1:
@@ -327,21 +314,21 @@ class DecoderTransformer(nn.Module):
             else:
                 print ("Beam Search can only be used with batch size of 1. Running greedy or temperature sampling...")
 
-        first_word = torch.ones(fs)*first_token_value
+        first_word = np.ones(fs)*first_token_value
 
-        first_word = first_word.to(device).long()
+        first_word = tf.fill([fs], first_token_value)
+        first_word = tf.cast(first_word, tf.int32)
         sampled_ids = [first_word]
         logits = []
 
         for i in range(self.seq_length):
             # forward
-            outputs, _ = self.forward(ingr_features, ingr_mask, torch.stack(sampled_ids, 1),
-                                      img_features, incremental_state)
-            outputs = outputs.squeeze(1)
+            outputs, _ = self.forward(ingr_features, ingr_mask, tf.stack(sampled_ids, axis=1), img_features)
+            outputs = tf.squeeze(outputs, axis=1)
             if not replacement:
                 # predicted mask
                 if i == 0:
-                    predicted_mask = torch.zeros(outputs.shape).float().to(device)
+                    predicted_mask = tf.zeros_like(outputs)
                 else:
                     # ensure no repetitions in sampling if replacement==False
                     batch_ind = [j for j in range(fs) if sampled_ids[i][j] != 0]
@@ -353,23 +340,22 @@ class DecoderTransformer(nn.Module):
 
             logits.append(outputs)
             if greedy:
-                outputs_prob = torch.nn.functional.softmax(outputs, dim=-1)
-                _, predicted = outputs_prob.max(1)
-                predicted = predicted.detach()
+                outputs_prob = tf.nn.softmax(outputs, axis=-1)
+                predicted = tf.argmax(outputs_prob, axis=1)
             else:
                 k = 10
-                outputs_prob = torch.div(outputs.squeeze(1), temperature)
-                outputs_prob = torch.nn.functional.softmax(outputs_prob, dim=-1).data
+                outputs_prob = outputs / temperature
+                outputs_prob = tf.nn.softmax(outputs_prob, axis=-1)
 
                 # top k random sampling
-                prob_prev_topk, indices = torch.topk(outputs_prob, k=k, dim=1)
-                predicted = torch.multinomial(prob_prev_topk, 1).view(-1)
-                predicted = torch.index_select(indices, dim=1, index=predicted)[:, 0].detach()
+                prob_prev_topk, indices = tf.nn.top_k(outputs_prob, k=k)
+                predicted = tf.random.categorical(tf.math.log(prob_prev_topk), 1)
+                predicted = tf.gather_nd(indices, predicted, batch_dims=1)
 
             sampled_ids.append(predicted)
 
-        sampled_ids = torch.stack(sampled_ids[1:], 1)
-        logits = torch.stack(logits, 1)
+        sampled_ids = tf.stack(sampled_ids[1:], axis=1)
+        logits = tf.stack(logits, axis=1)
 
         return sampled_ids, logits
 
@@ -378,13 +364,9 @@ class DecoderTransformer(nn.Module):
         k = beam
         alpha = 0.0
         # create dummy previous word
-        if ingr_features is not None:
-            fs = ingr_features.size(0)
-        else:
-            fs = img_features.size(0)
-        first_word = torch.ones(fs)*first_token_value
-
-        first_word = first_word.to(device).long()
+        fs = tf.shape(ingr_features)[0] if ingr_features is not None else tf.shape(img_features)[0]
+        first_word = tf.fill([fs], first_token_value)
+        first_word = tf.cast(first_word, tf.int32)
 
         sequences = [[[first_word], 0, {}, False, 1]]
         finished = []
@@ -394,13 +376,12 @@ class DecoderTransformer(nn.Module):
             all_candidates = []
             for rem in range(len(sequences)):
                 incremental = sequences[rem][2]
-                outputs, _ = self.forward(ingr_features, ingr_mask, torch.stack(sequences[rem][0], 1),
-                                          img_features, incremental)
-                outputs = outputs.squeeze(1)
+                outputs, _ = self.forward(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features)
+                outputs = tf.squeeze(outputs, axis=1)
                 if not replacement:
                     # predicted mask
                     if i == 0:
-                        predicted_mask = torch.zeros(outputs.shape).float().to(device)
+                        predicted_mask = tf.zeros_like(outputs)
                     else:
                         # ensure no repetitions in sampling if replacement==False
                         batch_ind = [j for j in range(fs) if sequences[rem][0][i][j] != 0]
@@ -410,8 +391,8 @@ class DecoderTransformer(nn.Module):
                     # mask previously selected ids
                     outputs += predicted_mask
 
-                outputs_prob = torch.nn.functional.log_softmax(outputs, dim=-1)
-                probs, indices = torch.topk(outputs_prob, beam)
+                outputs_prob = tf.nn.log_softmax(outputs, axis=-1)
+                probs, indices = tf.math.top_k(outputs_prob, k=beam)
                 # tokens is [batch x beam ] and every element is a list
                 # score is [ batch x beam ] and every element is a scalar
                 # incremental is [batch x beam ] and every element is a dict
@@ -419,8 +400,8 @@ class DecoderTransformer(nn.Module):
 
                 for bid in range(beam):
                     tokens = sequences[rem][0] + [indices[:, bid]]
-                    score = sequences[rem][1] + probs[:, bid].squeeze().item()
-                    if indices[:,bid].item() == last_token_value:
+                    score = sequences[rem][1] + probs[:, bid]
+                    if indices[:,bid] == last_token_value:
                         finished.append([tokens, score, None, True, sequences[rem][-1] + 1])
                     else:
                         all_candidates.append([tokens, score, incremental, False, sequences[rem][-1] + 1])
@@ -438,10 +419,10 @@ class DecoderTransformer(nn.Module):
             finished = sorted(finished,  key=lambda tup: tup[1]/(np.power(tup[-1],alpha)), reverse=True)[:k]
 
         if len(finished) != 0:
-            sampled_ids = torch.stack(finished[0][0][1:], 1)
+            sampled_ids = tf.stack(finished[0][0][1:], axis=1)
             logits = finished[0][1]
         else:
-            sampled_ids = torch.stack(sequences[0][0][1:], 1)
+            sampled_ids = tf.stack(sequences[0][0][1:], axis=1)
             logits = sequences[0][1]
         return sampled_ids, logits
 
@@ -460,28 +441,28 @@ class DecoderTransformer(nn.Module):
 
 
 def Embedding(num_embeddings, embedding_dim, padding_idx, ):
-    m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
-    nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
+    m = tf.keras.layers.Embedding(input_dim=num_embeddings, output_dim=embedding_dim, padding_idx=padding_idx)
+    weights = tf.random.normal(shape=(num_embeddings, embedding_dim), mean=0.0, stddev=embedding_dim ** -0.5)
+    weights = tf.tensor_scatter_nd_update(weights, tf.constant([[padding_idx]]), tf.zeros((1, embedding_dim)))
+    m.set_weights([weights])
     return m
 
 
 def LayerNorm(embedding_dim):
-    m = nn.LayerNorm(embedding_dim)
+    m = tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-5)
     return m
 
 
 def Linear(in_features, out_features, bias=True):
-    m = nn.Linear(in_features, out_features, bias)
-    nn.init.xavier_uniform_(m.weight)
-    nn.init.constant_(m.bias, 0.)
-    return m
+    return tf.keras.layers.Dense(units=out_features, use_bias=bias, kernel_initializer='glorot_uniform', bias_initializer='zeros')
 
 
 def PositionalEmbedding(num_embeddings, embedding_dim, padding_idx, left_pad, learned=False):
     if learned:
         m = LearnedPositionalEmbedding(num_embeddings, embedding_dim, padding_idx, left_pad)
-        nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
-        nn.init.constant_(m.weight[padding_idx], 0)
+        weights = tf.random.normal(shape=(num_embeddings, embedding_dim), mean=0.0, stddev=embedding_dim ** -0.5)
+        weights = tf.tensor_scatter_nd_update(weights, tf.constant([[padding_idx]]), tf.zeros((1, embedding_dim)))
+        m.set_weights([weights])
     else:
         m = SinusoidalPositionalEmbedding(embedding_dim, padding_idx, left_pad, num_embeddings)
     return m
