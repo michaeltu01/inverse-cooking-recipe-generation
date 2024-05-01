@@ -43,7 +43,7 @@ class LearnedPositionalEmbedding(tf.keras.layers.Layer):
         self.left_pad = left_pad
         self.embeddings = self.add_weight("embeddings", shape=[num_embeddings, embedding_dim], initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embedding_dim**-0.5))
 
-    def forward(self, input, incremental_state=None):
+    def call(self, input, incremental_state=None):
         """Input is expected to be of size [bsz x seqlen]."""
         if incremental_state is not None:
             # positions is the same for every token when decoding a single step
@@ -91,7 +91,7 @@ class SinusoidalPositionalEmbedding(tf.keras.layers.Layer):
             emb[padding_idx, :] = 0
         return emb
 
-    def forward(self, input, incremental_state=None):
+    def call(self, input, incremental_state=None):
         """Input is expected to be of size [bsz x seqlen]."""
         # recompute/expand embeddings if needed
         bsz, seq_len = tf.shape(input)[1]
@@ -144,7 +144,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         if self.use_last_ln:
             self.last_ln = tf.keras.layers.LayerNormalization(epsilon=1e-5)
 
-    def forward(self, x, ingr_features, ingr_mask, incremental_state, img_features):
+    def call(self, x, ingr_features, ingr_mask, incremental_state, img_features):
 
         # self attention
         residual = x
@@ -242,7 +242,7 @@ class DecoderTransformer(tf.keras.Module):
         self.layers = [TransformerDecoderLayer(embed_size, attention_nheads, dropout, normalize_before, last_ln) for _ in range(num_layers)]
         self.linear = tf.keras.layers.Dense(vocab_size)
 
-    def forward(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None):
+    def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None):
 
         if ingr_features is not None:
             ingr_features = ingr_features.permute(0, 2, 1)
@@ -323,7 +323,7 @@ class DecoderTransformer(tf.keras.Module):
 
         for i in range(self.seq_length):
             # forward
-            outputs, _ = self.forward(ingr_features, ingr_mask, tf.stack(sampled_ids, axis=1), img_features)
+            outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sampled_ids, axis=1), img_features)
             outputs = tf.squeeze(outputs, axis=1)
             if not replacement:
                 # predicted mask
@@ -376,7 +376,7 @@ class DecoderTransformer(tf.keras.Module):
             all_candidates = []
             for rem in range(len(sequences)):
                 incremental = sequences[rem][2]
-                outputs, _ = self.forward(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features)
+                outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features)
                 outputs = tf.squeeze(outputs, axis=1)
                 if not replacement:
                     # predicted mask
