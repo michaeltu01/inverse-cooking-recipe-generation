@@ -9,6 +9,7 @@ from PIL import Image
 from build_vocab import Vocabulary
 import random
 import lmdb
+import pickle
 
 
 class EpicuriousDataset(data.Dataset):
@@ -33,20 +34,20 @@ class EpicuriousDataset(data.Dataset):
             suff (str): Suffix for auxiliary data files.
         """
 
-        ## TODO: Load data from aux_data_dir. Use suff to help with this.
-        self.ingrs_vocab = ... 
-        self.instrs_vocab = ...
-        self.dataset = ...
+        ## Load data from aux_data_dir. Use suff to help with this.
+        self.ingrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'epicurious_vocab_ingrs.pkl'), 'rb'))
+        self.instrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'epicurious_vocab_toks.pkl'), 'rb'))
+        self.dataset = pickle.load(open(os.path.join(aux_data_dir, suff + 'epicurious_'+split+'.pkl'), 'rb'))
 
         self.label2word = self.get_ingrs_vocab()
 
-        # TODO: If a lambda function is provided, ensure that it is run correctly.
+        # If a lambda function is provided, ensure that it is run correctly.
         self.use_lmdb = use_lmdb
         if use_lmdb:
             self.image_file = lmdb.open(os.path.join(aux_data_dir, 'lmdb_' + split), max_readers=1, readonly=True,
                                         lock=False, readahead=False, meminit=False)
 
-        # TODO: Keep only the entries in the dataset that contain an image.
+        # Keep only the entries in the dataset that contain an image.
         self.ids = []
         self.split = split
         for i, entry in enumerate(self.dataset):
@@ -54,7 +55,7 @@ class EpicuriousDataset(data.Dataset):
                 continue
             self.ids.append(i)
 
-        # TODO: Check that these instance variables are initialized properly.
+        # Check that these instance variables are initialized properly.
         self.root = os.path.join(data_dir, 'images', split)
         self.transform = transform
         self.max_num_labels = maxnumlabels

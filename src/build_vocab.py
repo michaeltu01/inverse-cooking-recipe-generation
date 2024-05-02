@@ -147,9 +147,11 @@ def build_vocab_epicurious(args):
 
     ## Load data from CSV into pickle files
     CSV_PATH = os.path.join(args.epicurious_path, 'epicurious_data.csv')
-    COLS = ['Title','Instructions','Image_Name','Cleaned_Ingredients'] # not using the index or uncleaned Ingredients column in CSV
+    COLS = ['ID','Title','Ingredients','Instructions','Image_Name','Cleaned_Ingredients'] # not using the index or uncleaned Ingredients column in CSV
     DTYPES = {
+        'ID': 'int',
         'Title': 'str',
+        'Ingredients': 'str',
         'Instructions': 'str',
         'Image_Name': 'str',
         'Cleaned_Ingredients': 'str'
@@ -277,6 +279,7 @@ def build_vocab_epicurious(args):
     print("Total ingr vocabulary size: {}".format(len(vocab_ingrs)))
     print("Total token vocabulary size: {}".format(len(vocab_toks)))
 
+    ## CHANGE:      
     dataset = {'train': [], 'val': [], 'test': []}
 
     ######
@@ -326,6 +329,9 @@ def build_vocab_epicurious(args):
             toks.append(tokens)
 
         title = nltk.tokenize.word_tokenize(row['Title'].lower())
+        newentry = {'id': i, 'instructions': instrs_list, 'tokenized': toks,
+                    'ingredients': ingrs_list, 'images': image_path, 'title': title}
+        dataset[entry['partition']].append(newentry)
 
     print(f"Dataset size: {dataset.size}")
 
