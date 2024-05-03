@@ -143,7 +143,7 @@ class InverseCookingModel(tf.keras.Model):
 
             # select transformer steps to pool from
             mask_perminv = mask_from_eos(target_ingrs, eos_value=0, mult_before=False)
-            ingr_probs = ingr_logits * mask_perminv.float().unsqueeze(-1)
+            ingr_probs = ingr_logits * tf.expand_dim(tf.cast(mask_perminv, tf.float32), axis=-1)
 
             # NOTE: Replaced torch.max with tf.reduce_max
             ingr_probs = tf.reduce_max(ingr_probs, dim=1)
@@ -162,12 +162,28 @@ class InverseCookingModel(tf.keras.Model):
             losses['card_penalty'] = tf.math.abs((ingr_probs*target_one_hot).sum(1) - target_one_hot.sum(1)) + \
                                      tf.math.abs((ingr_probs*(1-target_one_hot)).sum(1))
 
-            eos_loss = self.crit_eos(eos, target_eos.float())
+            eos_loss = self.crit_eos(eos, tf.cast(target_eos, tf.float32))
 
             mult = 1/2
             # eos loss is only computed for timesteps <= t_eos and equally penalizes 0s and 1s
-            losses['eos_loss'] = mult*(eos_loss * eos_pos.float()).sum(1) / (eos_pos.float().sum(1) + 1e-6) + \
-                                 mult*(eos_loss * eos_head.float()).sum(1) / (eos_head.float().sum(1) + 1e-6)
+            # losses['eos_loss'] = mult*(eos_loss * eos_pos.float()).sum(1) / (eos_pos.float().sum(1) + 1e-6) + \
+            #                      mult*(eos_loss * eos_head.float()).sum(1) / (eos_head.float().sum(1) + 1e-6)
+            #casting boolean masks to floats
+            eos_pos_float = tf.cast(eos_pos, tf.float32)
+            eos_head_float = tf.cast(eos_head, tf.float32)
+
+            eos_pos_sum = tf.reduce_sum(eos_loss * eos_pos_float, axis=1)
+            eos_pos_count = tf.reduce_sum(eos_pos_float, axis=1) + 1e-6
+
+            eos_head_sum = tf.reduce_sum(eos_loss * eos_head_float, axis=1)
+            eos_head_count = tf.reduce_sum(eos_head_float, axis=1) + 1e-6
+
+            eos_loss_pos = mult * (eos_pos_sum / eos_pos_count)
+            eos_loss_head = mult * (eos_head_sum / eos_head_count)
+            
+            # Sum up the loss terms
+            losses['eos_loss'] = eos_loss_pos + eos_loss_head
+            #END OF MS changes
             # iou
             pred_one_hot = label2onehot(ingr_ids, self.pad_value)
             # iou sample during training is computed using the true eos position
@@ -180,7 +196,7 @@ class InverseCookingModel(tf.keras.Model):
         target_ingr_feats = self.ingredient_encoder(target_ingrs)
         target_ingr_mask = mask_from_eos(target_ingrs, eos_value=0, mult_before=False)
 
-        target_ingr_mask = target_ingr_mask.float().unsqueeze(1)
+        target_ingr_mask = tf.expand_dims(tf.cast(target_ingr_mask, tf.float32), axis=1)
 
         outputs, ids = self.recipe_decoder(target_ingr_feats, target_ingr_mask, captions, img_features)
 
@@ -213,7 +229,7 @@ class InverseCookingModel(tf.keras.Model):
             outputs['ingr_probs'] = ingr_probs.data
 
             mask = sample_mask
-            input_mask = mask.float().unsqueeze(1)
+            input_mask = tf.expand_dims(tf.cast(mask, tf.float32), axis=1)
             input_feats = self.ingredient_encoder(ingr_ids)
 
         if self.ingrs_only:
@@ -224,7 +240,7 @@ class InverseCookingModel(tf.keras.Model):
             input_mask = mask_from_eos(true_ingrs, eos_value=0, mult_before=False)
             true_ingrs[input_mask == 0] = self.pad_value
             input_feats = self.ingredient_encoder(true_ingrs)
-            input_mask = input_mask.unsqueeze(1)
+            input_mask = tf.expand_dims(input_mask, axis=1)
 
         ids, probs = self.recipe_decoder.sample(input_feats, input_mask, greedy, temperature, beam, img_features, 0,
                                                 last_token_value=1)
