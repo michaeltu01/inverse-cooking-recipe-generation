@@ -3,7 +3,7 @@ from tensorflow import nn
 
 class MultiheadAttention(nn.Module):
     """Multi-headed attention.
-    See "Attention Is All You Need" for more details.
+    See "Attention Is All You Need" for more details
     """
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True):
         super().__init__()
