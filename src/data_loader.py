@@ -174,3 +174,64 @@ class EpicuriousDataset(data.Dataset):
         for token in tokens:
             caption.append(self.instrs_vocab(token))
         return caption
+
+class DataLoader():
+    def __init__(self, dataset, batch_size, shuffle, num_workers, drop_last, collate_fn, pin_memory):
+        '''
+        dataset: data.Dataset - the dataset to sample over
+        batch_size: int - batch size
+        shuffle: Boolean - whether to shuffle the data between epochs
+        num_workers: int - the number of subprocs (?)
+        drop_last: Boolean - whether to drop the last non-complete batch
+        collate_fn: Callable - callable to collate the data
+        pin_memory: Boolean
+        '''
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.num_workers = num_workers
+        self.drop_last = drop_last
+        self.collate_fn = collate_fn
+        self.pin_memory = pin_memory
+
+def collate_fn(data):
+
+    # Sort a data list by caption length (descending order).
+    # data.sort(key=lambda x: len(x[2]), reverse=True)
+    image_input, captions, ingrs_gt, img_id, path, pad_value = zip(*data)
+
+    # Merge images (from tuple of 3D tensor to 4D tensor).
+
+    image_input = tf.stack(image_input, 0)
+    ingrs_gt = tf.stack(ingrs_gt, 0)
+
+    # Merge captions (from tuple of 1D tensor to 2D tensor).
+    lengths = [len(cap) for cap in captions]
+    targets = tf.cast(tf.ones(len(captions), max(lengths)), dtype=tf.int64) * pad_value[0]
+
+    for i, cap in enumerate(captions):
+        end = lengths[i]
+        targets[i, :end] = cap[:end]
+
+    return image_input, targets, ingrs_gt, img_id, path
+
+
+def get_loader(data_dir, aux_data_dir, split, maxseqlen,
+               maxnuminstrs, maxnumlabels, maxnumims, transform, batch_size,
+               shuffle, num_workers, drop_last=False,
+               max_num_samples=-1,
+               use_lmdb=False,
+               suff=''):
+
+    dataset = EpicuriousDataset(data_dir=data_dir, aux_data_dir=aux_data_dir, split=split,
+                              maxseqlen=maxseqlen, maxnumlabels=maxnumlabels, maxnuminstrs=maxnuminstrs,
+                              maxnumims=maxnumims,
+                              transform=transform,
+                              max_num_samples=max_num_samples,
+                              use_lmdb=use_lmdb,
+                              suff=suff)
+
+    data_loader = DataLoader(dataset=dataset,
+                                batch_size=batch_size, shuffle=shuffle, num_workers=num_workers,
+                                drop_last=drop_last, collate_fn=collate_fn, pin_memory=True)
+    return data_loader, dataset
