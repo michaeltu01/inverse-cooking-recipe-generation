@@ -198,6 +198,7 @@ def strip_ingredients(ingrs):
     
     return stripped_ingrs
 
+
 def build_vocab_epicurious(args):
     print ("Loading data...")
 
@@ -304,7 +305,6 @@ def build_vocab_epicurious(args):
 
     # TODO: Consider adding more entries for better clustering on the new training dataset
     ## Manually add missing entries for better clustering
-
     base_words = ['peppers', 'tomato', 'spinach_leaves', 'turkey_breast', 'lettuce_leaf',
                     'chicken_thighs', 'milk_powder', 'bread_crumbs', 'onion_flakes',
                     'red_pepper', 'pepper_flakes', 'juice_concentrate', 'cracker_crumbs', 'hot_chili',
@@ -323,10 +323,10 @@ def build_vocab_epicurious(args):
                     'philadelphia', 'cracker_crust', 'chicken_breast']
 
     for base_word in base_words:
+
         if base_word not in counter_ingrs.keys():
             counter_ingrs[base_word] = 1
 
-    # TODO: clean the dataset
     counter_ingrs, cluster_ingrs = cluster_ingredients(counter_ingrs)
     counter_ingrs, cluster_ingrs = remove_plurals(counter_ingrs, cluster_ingrs)
 
@@ -369,15 +369,8 @@ def build_vocab_epicurious(args):
     IMAGE_DIR = '../archive/Food Images/'
     for i, row in dataset_df.iterrows():
         instrs_list = []
-        acc_len = 0 # cumulative num of words
-        instrs_list = []
-        for instr in instrs.split('\n'):
-            instrs_list.append(instr)
-            acc_len += len(instr.split(' '))
-
-        ingrs_list = ast.literal_eval(['Cleaned_Ingredients'])
-        image_path = os.path.join(IMAGE_DIR, row['Image_Name'])
-        id2im[i] = image_path
+        ingrs_list = []
+        images_list = []
 
         # retrieve pre-detected ingredients for this entry
         labels = []
@@ -413,15 +406,15 @@ def build_vocab_epicurious(args):
                 instrs_list.append(instr)
 
         # we discard recipes with too many or too few ingredients or instruction words
-        if len(labels) < args.minnumingrs or len(labels) >= args.maxnumingrs \
-                or len(instrs_list) < args.minnuminstrs or len(instrs_list) >= args.maxnuminstrs \
+        if len(labels) < args.minnumingrs or len(instrs_list) < args.minnuminstrs \
+                or len(instrs_list) >= args.maxnuminstrs or len(labels) >= args.maxnumingrs \
                 or acc_len < args.minnumwords:
             continue
 
         # if an image path exists, append it to the images list
         if len(id2im[i]) > 0:
             images_list.append(id2im[i])
-            
+
         # tokenize sentences
         toks = []
         
