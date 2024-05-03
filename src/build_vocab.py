@@ -145,31 +145,8 @@ def cluster_ingredients(counter_ingrs):
 def build_vocab_epicurious(args):
     print ("Loading data...")
 
-    ## Load data from CSV into pickle files
-    CSV_PATH = os.path.join(args.epicurious_path, 'epicurious_data.csv')
-    COLS = ['Title','Instructions','Image_Name','Cleaned_Ingredients'] # not using the index or uncleaned Ingredients column in CSV
-    DTYPES = {
-        'Title': 'str',
-        'Instructions': 'str',
-        'Image_Name': 'str',
-        'Cleaned_Ingredients': 'str'
-    }
+    ...
 
-    # Read the CSV into a pandas dataframe for ease of manipulation
-    dataset_df = pd.read_csv(
-        filepath_or_buffer=CSV_PATH,
-        header=0, # marks the first row as the header row
-        usecols=COLS,
-        dtype=DTYPES
-    )
-
-    # Convert to pkl file and save it
-    dataset_df.to_pickle(os.path.join(args.save_path, 'epicurious_dataset.pkl'))
-
-    print("Loaded data.")
-    print(f"Loaded {dataset_df.size} recipes from the Epicurious Dataset.")
-
-    id2im = {}
     ingrs_file = args.save_path + 'allingrs_count.pkl'
     instrs_file = args.save_path + 'allwords_count.pkl'
 
@@ -216,7 +193,6 @@ def build_vocab_epicurious(args):
         pickle.dump(counter_ingrs, open(args.save_path + 'allingrs_count.pkl', 'wb'))
         pickle.dump(counter_toks, open(args.save_path + 'allwords_count.pkl', 'wb'))
 
-    # TODO: Make sure that this aligns with our current data
     # manually add missing entries for better clustering
     '''
     base_words = ['peppers', 'tomato', 'spinach_leaves', 'turkey_breast', 'lettuce_leaf',
