@@ -215,7 +215,7 @@ def build_vocab_epicurious(args):
     }
 
     # Read the CSV into a pandas dataframe for ease of manipulation
-    dataset_df = pd.read_csv(CSV_PATH)
+    dataset_df = pd.read_csv(args.epicurious_path)
 
     print("Loaded data.")
     print(f"Loaded {dataset_df.shape[0]} recipes from the Epicurious Dataset.")
@@ -242,6 +242,9 @@ def build_vocab_epicurious(args):
     replace_dict_instrs = {'and': ['&', "'n"], '': ['#', '[', ']']}
     id2im = {}
 
+    # add an entry to the id -> image dictionary
+    # id2im[i] = row['Image_Name']
+
     ingrs_file = args.save_path + 'allingrs_count.pkl'
     instrs_file = args.save_path + 'allwords_count.pkl'
 
@@ -257,8 +260,6 @@ def build_vocab_epicurious(args):
         counter_toks = Counter()
 
         for i, row in dataset_df.iterrows():
-            # add an entry to the id -> image dictionary
-            id2im[i] = row['Image_Name']
 
             # get the instructions for this recipe
             instrs: str = row['Instructions']
@@ -412,8 +413,9 @@ def build_vocab_epicurious(args):
             continue
 
         # if an image path exists, append it to the images list
-        if len(id2im[i]) > 0:
-            images_list.append(id2im[i])
+        image_path = row['Image_Name']
+        if len(image_path) > 0:
+            images_list.append(image_path)
 
         # tokenize sentences
         toks = []
@@ -457,10 +459,10 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--epicurious_path', type=str,
-                        default='path/to/epicurious',
+                        default='./archive/epicurious_data.csv',
                         help='epicurious path')
 
-    parser.add_argument('--save_path', type=str, default='../data/',
+    parser.add_argument('--save_path', type=str, default='./data/',
                         help='path for saving vocabulary wrapper')
 
     parser.add_argument('--suff', type=str, default='')
