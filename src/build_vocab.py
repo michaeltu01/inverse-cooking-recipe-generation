@@ -1,14 +1,16 @@
 import nltk
 import pickle
-import argparse
 from collections import Counter
-import json
 import os
 from tqdm import *
 import numpy as np
 import re
 import pandas as pd
 import ast
+import string
+import argparse
+
+nltk.download('punkt')
 
 class Vocabulary(object):
     """Simple vocabulary wrapper."""
@@ -44,7 +46,7 @@ class Vocabulary(object):
 
 
 def get_ingredient(det_ingr, replace_dict):
-    det_ingr_undrs = det_ingr['text'].lower()
+    det_ingr_undrs = det_ingr.lower()
     det_ingr_undrs = ''.join(i for i in det_ingr_undrs if not i.isdigit())
 
     for rep, char_list in replace_dict.items():
@@ -70,34 +72,11 @@ def get_instruction(instruction, replace_dict, instruction_mode=True):
         instruction = ''
     return instruction
 
-
-def remove_plurals(counter_ingrs, ingr_clusters):
-    del_ingrs = []
-
-    for k, v in counter_ingrs.items():
-
-        if len(k) == 0:
-            del_ingrs.append(k)
-            continue
-
-        gotit = 0
-        if k[-2:] == 'es':
-            if k[:-2] in counter_ingrs.keys():
-                counter_ingrs[k[:-2]] += v
-                ingr_clusters[k[:-2]].extend(ingr_clusters[k])
-                del_ingrs.append(k)
-                gotit = 1
-
-        if k[-1] == 's' and gotit == 0:
-            if k[:-1] in counter_ingrs.keys():
-                counter_ingrs[k[:-1]] += v
-                ingr_clusters[k[:-1]].extend(ingr_clusters[k])
-                del_ingrs.append(k)
-    for item in del_ingrs:
-        del counter_ingrs[item]
-        del ingr_clusters[item]
-    return counter_ingrs, ingr_clusters
-
+def update_counter(list_, counter_toks, istrain=False):
+    for sentence in list_:
+        tokens = nltk.tokenize.word_tokenize(sentence)
+        if istrain:
+            counter_toks.update(tokens)
 
 def cluster_ingredients(counter_ingrs):
     '''
@@ -141,11 +120,126 @@ def cluster_ingredients(counter_ingrs):
 
     return mydict, mydict_ingrs
 
+def remove_plurals(counter_ingrs, ingr_clusters):
+    del_ingrs = []
+
+    for k, v in counter_ingrs.items():
+
+        if len(k) == 0:
+            del_ingrs.append(k)
+            continue
+
+        gotit = 0
+        if k[-2:] == 'es':
+            if k[:-2] in counter_ingrs.keys():
+                counter_ingrs[k[:-2]] += v
+                ingr_clusters[k[:-2]].extend(ingr_clusters[k])
+                del_ingrs.append(k)
+                gotit = 1
+
+        if k[-1] == 's' and gotit == 0:
+            if k[:-1] in counter_ingrs.keys():
+                counter_ingrs[k[:-1]] += v
+                ingr_clusters[k[:-1]].extend(ingr_clusters[k])
+                del_ingrs.append(k)
+    for item in del_ingrs:
+        del counter_ingrs[item]
+        del ingr_clusters[item]
+    return counter_ingrs, ingr_clusters
+
+# Strip the ingredients of measurements and preparation style
+def strip_ingredients(ingrs):
+    '''
+    ingrs: List of ingredients
+    Strip every ingredient of its measurements and preparation style. For example, 
+        - "1 medium onion, chopped" should be "onion". 
+        - "1 cup dry white wine" should be "dry white wine"
+    
+    Some techniques used to strip the ingredients include:
+        - Removing fractions (both Unicode characters and long-form style [e.g. "1/4"])
+        - Removing parenthetical clauses
+        - Skip all ingredients that contain "Ingredient Info"
+        - Removing certain stopwords, such as measure words and prepositions
+        - Removing punctuation
+        - Removing numbers
+
+    Return the list of stripped ingredients.
+    '''
+    # Strip the ingredient of words after the punctuation
+    stripped_ingrs = []
+    fraction_pattern = r"\d+\s*\/\s*\d+"
+    parenthesis_pattern = r'\([^)]*\)'
+    fracs = "½ ¼ ¾ ⅓ ⅔ ⅕ ⅖ ⅗ ⅘ ⅙ ⅚ ⅛ ⅜ ⅝ ⅞"
+    for ingr in ingrs:
+        if 'ingredient info' in ingr.lower():
+            continue
+        clean_ingr = re.sub(parenthesis_pattern, '', ingr)
+        stopwords = ["cup", "cups", "teaspoon", "teaspoons", "tablespoon", "tablespoons",
+                 "tbsp", "tsp", "ounce", "ounces", "oz", "fl oz", "fluid ounce",
+                 "pint", "pints", "quart", "quarts", "gallon", "gallons", "pound",
+                 "pounds", "lb", "mg", "milligram", "grams", "g", "kg", "kilogram",
+                 "medium", "large", "small", "diced", "chopped", "pinch", "pinches",
+                 "slice", "slices", "piece", "pieces", "cloves", "clove", "cans", "can",
+                 "of", "in", "with", "for", "to", "as", "from", "on", "at", "by", "plus", "sticks", "equipment", "serving"]
+        tokenized_ingr = nltk.tokenize.word_tokenize(clean_ingr)
+        stripped_tokens = []
+        for tok in tokenized_ingr:
+            if tok in ";:,":
+                break
+            if tok.isdigit() or tok.lower() in stopwords or re.match(fraction_pattern, tok) or tok in string.punctuation or tok in fracs:
+                continue
+            stripped_tokens.append(tok)
+        stripped_ingr = ' '.join(stripped_tokens)
+        stripped_ingr = stripped_ingr.strip()
+        if len(stripped_ingr) == 0:
+            continue
+        else:
+            stripped_ingrs.append(stripped_ingr)
+    
+    return stripped_ingrs
 
 def build_vocab_epicurious(args):
     print ("Loading data...")
 
-    ...
+    ## Load data from CSV into pickle files
+    CSV_PATH = './archive/epicurious_data.csv'
+    COLS = ['ID','Title','Ingredients','Instructions','Image_Name','Cleaned_Ingredients'] # not using the index or uncleaned Ingredients column in CSV
+    DTYPES = {
+        'ID': 'int',
+        'Title': 'str',
+        'Ingredients': 'str',
+        'Instructions': 'str',
+        'Image_Name': 'str',
+        'Cleaned_Ingredients': 'str'
+    }
+
+    # Read the CSV into a pandas dataframe for ease of manipulation
+    dataset_df = pd.read_csv(CSV_PATH)
+
+    print("Loaded data.")
+    print(f"Loaded {dataset_df.shape[0]} recipes from the Epicurious Dataset.")
+
+    ## Split the dataset into train, validation, and test sets
+
+    # Determine what index the splits occur on
+    dataset_size = dataset_df.shape[0]
+    print(dataset_size)
+    train_index = (dataset_size // 7) * 5
+    val_index = train_index + (dataset_size // 7)
+    test_index = dataset_size
+    print("Training samples:", train_index)
+    print("Validation samples:", val_index - train_index)
+    print("Test samples:", test_index - val_index)
+
+    # Split the dataset into train, val, and test sets
+    dataset_df.loc[:, 'Partition'] = ''
+    dataset_df.iloc[:train_index, dataset_df.columns.get_loc('Partition')] = 'train'
+    dataset_df.iloc[train_index:val_index, dataset_df.columns.get_loc('Partition')] = 'val'
+    dataset_df.iloc[val_index:test_index, dataset_df.columns.get_loc('Partition')] = 'test'
+
+    replace_dict_ingrs = {'and': ['&', "'n"], '': ['%', ',', '.', '#', '[', ']', '!', '?']}
+    replace_dict_instrs = {'and': ['&', "'n"], '': ['#', '[', ']']}
+    id2im = {}
 
     ingrs_file = args.save_path + 'allingrs_count.pkl'
     instrs_file = args.save_path + 'allwords_count.pkl'
@@ -162,6 +256,9 @@ def build_vocab_epicurious(args):
         counter_toks = Counter()
 
         for i, row in dataset_df.iterrows():
+            # add an entry to the id -> image dictionary
+            id2im[i] = row['Image_Name']
+
             # get the instructions for this recipe
             instrs: str = row['Instructions']
             ingrs: str = row['Cleaned_Ingredients']
@@ -169,54 +266,65 @@ def build_vocab_epicurious(args):
             # split the recipe into a list of instructions (list of words)
             acc_len = 0 # cumulative num of words
             instrs_list = []
+            if isinstance(instrs, float):
+                continue
             for instr in instrs.split('\n'):
-                instrs_list.append(instr)
-                acc_len += len(instr.split(' '))
-            
+                instr = get_instruction(instr, replace_dict_instrs)
+                if len(instr) > 0:
+                    instrs_list.append(instr)
+                    acc_len += len(instr.split(' '))
+                
             # convert the cleaned ingredients into a Python list
             ingrs_list = ast.literal_eval(ingrs)
+            ingrs_list = strip_ingredients(ingrs_list)
+            filtered_ingrs = []
+            for j, ingr in enumerate(ingrs_list):
+                if len(ingr.split(' ')) > 0:
+                    filtered_ingr = get_ingredient(ingr, replace_dict_ingrs)
+                    filtered_ingrs.append(filtered_ingr)
 
             # discard recipes with too few or too many ingredients or instruction words
-            if len(ingrs_list) < args.minnumingrs or len(ingrs_list) >= args.maxnumingrs \
+            if len(filtered_ingrs) < args.minnumingrs or len(filtered_ingrs) >= args.maxnumingrs \
                 or len(instrs_list) < args.minnuminstrs or len(instrs_list) >= args.maxnuminstrs \
                 or acc_len < args.minnumwords:
                 continue
 
-            # tokenize sentences + title and update counter
-            for sentence in instrs_list:
-                tokens = nltk.tokenize.word_tokenize(sentence)
-                counter_toks.update(tokens)
+            # tokenize sentences and update counter
+            update_counter(instrs_list, counter_toks, istrain=row['Partition'] == 'train')
             title = nltk.tokenize.word_tokenize(row['Title'].lower())
-            counter_toks.update(title)
-            counter_ingrs.update(ingrs_list)
+            if row['Partition'] == 'train':
+                counter_toks.update(title)
+            if row['Partition'] == 'train':
+                counter_ingrs.update(filtered_ingrs)
 
         pickle.dump(counter_ingrs, open(args.save_path + 'allingrs_count.pkl', 'wb'))
         pickle.dump(counter_toks, open(args.save_path + 'allwords_count.pkl', 'wb'))
 
-    # manually add missing entries for better clustering
-    '''
+    # Cluster ingredients
+
+    # TODO: Consider adding more entries for better clustering on the new training dataset
+    ## Manually add missing entries for better clustering
+
     base_words = ['peppers', 'tomato', 'spinach_leaves', 'turkey_breast', 'lettuce_leaf',
-                  'chicken_thighs', 'milk_powder', 'bread_crumbs', 'onion_flakes',
-                  'red_pepper', 'pepper_flakes', 'juice_concentrate', 'cracker_crumbs', 'hot_chili',
-                  'seasoning_mix', 'dill_weed', 'pepper_sauce', 'sprouts', 'cooking_spray', 'cheese_blend',
-                  'basil_leaves', 'pineapple_chunks', 'marshmallow', 'chile_powder',
-                  'cheese_blend', 'corn_kernels', 'tomato_sauce', 'chickens', 'cracker_crust',
-                  'lemonade_concentrate', 'red_chili', 'mushroom_caps', 'mushroom_cap', 'breaded_chicken',
-                  'frozen_pineapple', 'pineapple_chunks', 'seasoning_mix', 'seaweed', 'onion_flakes',
-                  'bouillon_granules', 'lettuce_leaf', 'stuffing_mix', 'parsley_flakes', 'chicken_breast',
-                  'basil_leaves', 'baguettes', 'green_tea', 'peanut_butter', 'green_onion', 'fresh_cilantro',
-                  'breaded_chicken', 'hot_pepper', 'dried_lavender', 'white_chocolate',
-                  'dill_weed', 'cake_mix', 'cheese_spread', 'turkey_breast', 'chucken_thighs', 'basil_leaves',
-                  'mandarin_orange', 'laurel', 'cabbage_head', 'pistachio', 'cheese_dip',
-                  'thyme_leave', 'boneless_pork', 'red_pepper', 'onion_dip', 'skinless_chicken', 'dark_chocolate',
-                  'canned_corn', 'muffin', 'cracker_crust', 'bread_crumbs', 'frozen_broccoli',
-                  'philadelphia', 'cracker_crust', 'chicken_breast']
-    
+                    'chicken_thighs', 'milk_powder', 'bread_crumbs', 'onion_flakes',
+                    'red_pepper', 'pepper_flakes', 'juice_concentrate', 'cracker_crumbs', 'hot_chili',
+                    'seasoning_mix', 'dill_weed', 'pepper_sauce', 'sprouts', 'cooking_spray', 'cheese_blend',
+                    'basil_leaves', 'pineapple_chunks', 'marshmallow', 'chile_powder',
+                    'cheese_blend', 'corn_kernels', 'tomato_sauce', 'chickens', 'cracker_crust',
+                    'lemonade_concentrate', 'red_chili', 'mushroom_caps', 'mushroom_cap', 'breaded_chicken',
+                    'frozen_pineapple', 'pineapple_chunks', 'seasoning_mix', 'seaweed', 'onion_flakes',
+                    'bouillon_granules', 'lettuce_leaf', 'stuffing_mix', 'parsley_flakes', 'chicken_breast',
+                    'basil_leaves', 'baguettes', 'green_tea', 'peanut_butter', 'green_onion', 'fresh_cilantro',
+                    'breaded_chicken', 'hot_pepper', 'dried_lavender', 'white_chocolate',
+                    'dill_weed', 'cake_mix', 'cheese_spread', 'turkey_breast', 'chucken_thighs', 'basil_leaves',
+                    'mandarin_orange', 'laurel', 'cabbage_head', 'pistachio', 'cheese_dip',
+                    'thyme_leave', 'boneless_pork', 'red_pepper', 'onion_dip', 'skinless_chicken', 'dark_chocolate',
+                    'canned_corn', 'muffin', 'cracker_crust', 'bread_crumbs', 'frozen_broccoli',
+                    'philadelphia', 'cracker_crust', 'chicken_breast']
 
     for base_word in base_words:
         if base_word not in counter_ingrs.keys():
             counter_ingrs[base_word] = 1
-    '''
 
     # TODO: clean the dataset
     counter_ingrs, cluster_ingrs = cluster_ingredients(counter_ingrs)
@@ -224,10 +332,10 @@ def build_vocab_epicurious(args):
 
     # If the word frequency is less than 'threshold', then the word is discarded.
     words = [word for word, cnt in counter_toks.items() if cnt >= args.threshold_words]
-    ingrs = {word: cnt for word, cnt in counter_ingrs.items() if cnt >= args.threshold_ingrs}
+    ingrs = {word: cnt for word, cnt in counter_ingrs.items() if cnt >= args.threshold_ingrs}   
 
     # Recipe vocab
-    # Create a vocab wrapper and add some special tokens.
+    # Create a vocabulary
     vocab_toks = Vocabulary()
     vocab_toks.add_word('<start>')
     vocab_toks.add_word('<end>')
@@ -237,7 +345,7 @@ def build_vocab_epicurious(args):
     for i, word in enumerate(words):
         vocab_toks.add_word(word)
     vocab_toks.add_word('<pad>')
-
+    
     # Ingredient vocab
     # Create a vocab wrapper for ingredients
     vocab_ingrs = Vocabulary()
@@ -252,7 +360,7 @@ def build_vocab_epicurious(args):
 
     print("Total ingr vocabulary size: {}".format(len(vocab_ingrs)))
     print("Total token vocabulary size: {}".format(len(vocab_toks)))
-
+ 
     dataset = {'train': [], 'val': [], 'test': []}
 
     ######
@@ -260,9 +368,6 @@ def build_vocab_epicurious(args):
     ######
     IMAGE_DIR = '../archive/Food Images/'
     for i, row in dataset_df.iterrows():
-        # get all instructions for this recipe
-        instrs = row['Instructions']
-
         instrs_list = []
         acc_len = 0 # cumulative num of words
         instrs_list = []
@@ -277,16 +382,35 @@ def build_vocab_epicurious(args):
         # retrieve pre-detected ingredients for this entry
         labels = []
 
-        # BUG: not sure what this block of code does
-        '''
-        for j, det_ingr in enumerate(det_ingrs):
-            if len(det_ingr) > 0 and valid[j]:
-                det_ingr_undrs = get_ingredient(det_ingr, replace_dict_ingrs)
-                ingrs_list.append(det_ingr_undrs)
-                label_idx = vocab_ingrs(det_ingr_undrs)
+        ingrs = row['Cleaned_Ingredients']
+        ingrs = ast.literal_eval(ingrs)
+        ingrs = strip_ingredients(ingrs)
+        filtered_ingrs = []
+        for j, ingr in enumerate(ingrs):
+            if len(ingr.split(' ')) > 0:
+                filtered_ingr = get_ingredient(ingr, replace_dict_ingrs)
+                filtered_ingrs.append(filtered_ingr)
+
+        for j, ingr in enumerate(filtered_ingrs):
+            if len(ingr) > 0:
+                filtered_ingr_undrs = get_ingredient(ingr, replace_dict_ingrs)
+                ingrs_list.append(filtered_ingr_undrs)
+                label_idx = vocab_ingrs(filtered_ingr_undrs)
                 if label_idx is not vocab_ingrs('<pad>') and label_idx not in labels:
                     labels.append(label_idx)
-        '''
+
+        # get raw text for instructions of this entry
+
+        # get all instructions for this recipe
+        instrs = row['Instructions']
+        acc_len = 0
+        if isinstance(instrs, float):
+            continue
+        for instr in instrs.split('\n'):
+            instr = get_instruction(instr, replace_dict_instrs)
+            if len(instr) > 0:
+                acc_len += len(instr.split(' '))
+                instrs_list.append(instr)
 
         # we discard recipes with too many or too few ingredients or instruction words
         if len(labels) < args.minnumingrs or len(labels) >= args.maxnumingrs \
@@ -294,16 +418,30 @@ def build_vocab_epicurious(args):
                 or acc_len < args.minnumwords:
             continue
 
+        # if an image path exists, append it to the images list
+        if len(id2im[i]) > 0:
+            images_list.append(id2im[i])
+            
         # tokenize sentences
         toks = []
-
+        
         for instr in instrs_list:
             tokens = nltk.tokenize.word_tokenize(instr)
             toks.append(tokens)
 
         title = nltk.tokenize.word_tokenize(row['Title'].lower())
+        # print("creating new entry")
+        newentry = {'id': i, 'instructions': instrs_list, 'tokenized': toks,
+                    'ingredients': ingrs_list, 'images': images_list, 'title': title} # NOTE: 'images' => list[str]
+        dataset[row['Partition']].append(newentry)
 
-    print(f"Dataset size: {dataset.size}")
+    print('Dataset size:')
+    total_size = 0
+    for split in dataset.keys():
+        split_size = len(dataset[split])
+        total_size += split_size
+        print(split, ':', split_size)
+    print("total size :", total_size)
 
     return vocab_ingrs, vocab_toks, dataset
 
