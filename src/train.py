@@ -82,26 +82,6 @@ def load_and_preprocess_image(image_path, is_train, image_size, crop_size):
     
     return image
 
-
-def get_loader(data_dir, aux_data_dir, split, maxseqlen, maxnuminstrs, maxnumlabels, maxnumims, transform, batch_size, shuffle, num_workers, drop_last, max_num_samples, use_lmdb, suff):
-    # Assume the dataset is in a standard TensorFlow format, e.g., a directory of images
-    list_ds = tf.data.Dataset.list_files(os.path.join(data_dir, split, '*.jpg'))
-    dataset = list_ds.map(lambda x: load_and_preprocess_image(x, split == 'train', args.image_size, args.crop_size), 
-                          num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
-    # Optionally shuffle, repeat, and batch the dataset
-    if shuffle:
-        dataset = dataset.shuffle(buffer_size=10000)
-    dataset = dataset.batch(batch_size)
-    if drop_last:
-        # Ensure that all batches have the same number of examples
-        dataset = dataset.filter(lambda x: tf.shape(x)[0] == batch_size)
-
-    return dataset
-
-
-
-
 def main(args):
 
     # Create model directory & other aux folders for logging
