@@ -23,14 +23,14 @@ def label2onehot(labels, pad_value):
     return one_hot
 
 def mask_from_eos(ids, eos_value, mult_before=True):
-    # mask = torch.ones(ids.size()).to(device).byte()
+    # mask = torch.ones(ids,)).to(device).byte()
     # mask_aux = torch.ones(ids.size(0)).to(device).byte()
 
     mask = tf.ones_like(ids)
     mask_aux = tf.ones((ids.shape[0]))
 
     # find eos in ingredient prediction
-    for idx in range(ids.size(1)):
+    for idx in range(tf.shape(ids)[1]):
         # force mask to have 1s in the first position to avoid division by 0 when predictions start with eos
         if idx == 0:
             continue
@@ -46,7 +46,7 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
 
     # build ingredients embedding
     encoder_ingrs = EncoderLabels(args.embed_size, ingr_vocab_size,
-                                  args.dropout_encoder, scale_grad=False).to(device)
+                                  args.dropout_encoder, scale_grad=False)
     # build image model
     encoder_image = EncoderCNN(args.embed_size, args.dropout_encoder, args.image_model)
 
@@ -111,7 +111,7 @@ class InverseCookingModel(tf.keras.Model):
             return self.sample(img_inputs, greedy=True)
 
         targets = captions[:, 1:]
-        targets = targets.contiguous().view(-1)
+        targets = tf.reshape(targets, [-1])
 
         img_features = self.image_encoder(img_inputs, keep_cnn_gradients)
 
@@ -122,7 +122,7 @@ class InverseCookingModel(tf.keras.Model):
         # ingredient prediction
         if not self.recipe_only:
             target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
-            target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / target_one_hot_smooth.size(-1)
+            target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / tf.shape(target_one_hot_smooth)[-1]
 
             # decode ingredients with transformer
             # autoregressive mode for ingredient decoder
@@ -159,8 +159,8 @@ class InverseCookingModel(tf.keras.Model):
 
             # cardinality penalty
             # NOTE: Replaced torch.abs -> tf.math.abs
-            losses['card_penalty'] = tf.math.abs((ingr_probs*target_one_hot).sum(1) - target_one_hot.sum(1)) + \
-                                     tf.math.abs((ingr_probs*(1-target_one_hot)).sum(1))
+            losses['card_penalty'] = tf.math.abs(tf.reduce_sum(ingr_probs*target_one_hot, axis=1) - tf.reduce_sum(target_one_hot, axis=1) + \
+                                     tf.math.abs(tf.reduce_sum(ingr_probs*(1-target_one_hot), axis=1))
 
             eos_loss = self.crit_eos(eos, tf.cast(target_eos, tf.float32))
 
@@ -200,8 +200,8 @@ class InverseCookingModel(tf.keras.Model):
 
         outputs, ids = self.recipe_decoder(target_ingr_feats, target_ingr_mask, captions, img_features)
 
-        outputs = outputs[:, :-1, :].contiguous()
-        outputs = outputs.view(outputs.size(0) * outputs.size(1), -1)
+        outputs = outputs[:, :-1, :]
+        outputs = outputs.view(tf.shape(outputs)[0] * tf.shape(outputs)[1], -1)
 
         loss = self.crit(outputs, targets)
 
