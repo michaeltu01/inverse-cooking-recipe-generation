@@ -10,6 +10,7 @@ from operator import itemgetter
 from tensorboardX import SummaryWriter
 
 # For images with shape [Batch, Width, Height, Channels]
+# https://stackoverflow.com/questions/43531495/tiling-images-in-a-grid-i-e-with-wrapround-in-tensorflow
 def image_grid(x, size=8):
     t = tf.unstack(x[:size * size], num=size*size, axis=0)
     rows = [tf.concat(t[i*size:(i+1)*size], axis=0) 
