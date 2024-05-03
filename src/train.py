@@ -1,8 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 from args import get_parser
 import tensorflow as tf
-import torch.nn as nn
-import torch.autograd as autograd
 import numpy as np
 import os
 import random
@@ -13,7 +11,6 @@ from model import get_model
 import sys
 import json
 import time
-import torch.backends.cudnn as cudnn
 from utils.tb_visualizer import Visualizer
 from model import mask_from_eos, label2onehot
 from utils.metrics import softIoU, compute_metrics, update_error_types
