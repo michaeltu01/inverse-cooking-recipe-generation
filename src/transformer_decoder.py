@@ -245,19 +245,21 @@ class DecoderTransformer(tf.keras.Module):
     def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None):
 
         if ingr_features is not None:
-            ingr_features = ingr_features.permute(0, 2, 1)
-            ingr_features = ingr_features.transpose(0, 1)
+            ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
+            ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
             if self.normalize_inputs:
                 self.layer_norms_in[0](ingr_features)
 
         if img_features is not None:
-            img_features = img_features.permute(0, 2, 1)
-            img_features = img_features.transpose(0, 1)
+            ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
+            ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
             if self.normalize_inputs:
                 self.layer_norms_in[1](img_features)
 
         if ingr_mask is not None:
-            ingr_mask = (1-ingr_mask.squeeze(1)).byte()
+            ingr_mask = tf.squeeze(ingr_mask, axis=1)
+            ingr_mask = 1 - ingr_mask
+            ingr_mask = tf.cast(ingr_mask, tf.uint8)
 
         # embed positions
         if self.embed_positions is not None:
@@ -279,7 +281,7 @@ class DecoderTransformer(tf.keras.Module):
         x = tf.keras.layers.Dropout(self.dropout)(x, training=self.training)
 
         # B x T x C -> T x B x C
-        x = x.transpose(0, 1)
+        x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
 
         for p, layer in enumerate(self.layers):
             x  = layer(
@@ -291,7 +293,7 @@ class DecoderTransformer(tf.keras.Module):
             )
             
         # T x B x C -> B x T x C
-        x = x.transpose(0, 1)
+        x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
 
         x = self.linear(x)
         _, predicted = tf.argmax(axis=-1)
@@ -435,7 +437,7 @@ class DecoderTransformer(tf.keras.Module):
             if 'decoder.embed_positions.weights' in state_dict:
                 del state_dict['decoder.embed_positions.weights']
             if 'decoder.embed_positions._float_tensor' not in state_dict:
-                state_dict['decoder.embed_positions._float_tensor'] = torch.FloatTensor()
+                state_dict['decoder.embed_positions._float_tensor'] = tf.zeros([])
         return state_dict
 
 
