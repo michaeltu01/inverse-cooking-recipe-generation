@@ -4,7 +4,6 @@ import numpy as np
 from args import get_parser
 import pickle
 import os
-# from torchvision import transforms
 from tensorflow import image
 from build_vocab import Vocabulary
 from model import get_model
@@ -98,7 +97,6 @@ def main(args):
     model.load_weights(model_path)
 
     model.eval()
-    # model = model.to(device)
     results_dict = {'recipes': {}, 'ingrs': {}, 'ingr_iou': {}}
     captions = {}
     iou = []
@@ -107,68 +105,55 @@ def main(args):
     n_rep, th = 0, 0.3
 
     for i, (img_inputs, true_caps_batch, ingr_gt, imgid, impath) in tqdm(enumerate(data_loader)):
-
-        ingr_gt = ingr_gt.to(device)
-        true_caps_batch = true_caps_batch.to(device)
-
         true_caps_shift = true_caps_batch.clone()[:, 1:].contiguous()
-        img_inputs = img_inputs.to(device)
-
         true_ingrs = ingr_gt if args.use_true_ingrs else None
         for gens in range(args.numgens):
-            with torch.no_grad():
+            if args.get_perplexity:
+                losses = model(img_inputs, true_caps_batch, ingr_gt, keep_cnn_gradients=False)
+                recipe_loss = losses['recipe_loss']
+                recipe_loss = tf.reshape(recipe_loss, true_caps_shift.shape)
+                non_pad_mask =  true_caps_shift.ne(instrs_vocab_size - 1).float()
+                recipe_loss = tf.reduce_sum(recipe_loss*non_pad_mask, axis=-1) / tf.reduce_sum(non_pad_mask, axis=-1)
+                perplexity = tf.exp(recipe_loss)
 
-                if args.get_perplexity:
+                perplexity = tf.stop_gradient(perplexity).numpy().tolist()
+                perplexity_list.extend(perplexity)
+            else:
+                outputs = model.sample(img_inputs, args.greedy, args.temperature, args.beam, true_ingrs)
 
-                    losses = model(img_inputs, true_caps_batch, ingr_gt, keep_cnn_gradients=False)
-                    recipe_loss = losses['recipe_loss']
-                    recipe_loss = recipe_loss.view(true_caps_shift.size())
-                    non_pad_mask = true_caps_shift.ne(instrs_vocab_size - 1).float()
-                    recipe_loss = torch.sum(recipe_loss*non_pad_mask, dim=-1) / torch.sum(non_pad_mask, dim=-1)
-                    perplexity = torch.exp(recipe_loss)
+                if not args.recipe_only:
+                    fake_ingrs = outputs['ingr_ids']
+                    pred_one_hot = label2onehot(fake_ingrs, ingr_vocab_size - 1)
+                    target_one_hot = label2onehot(ingr_gt, ingr_vocab_size - 1)
+                    iou_item = tf.get_static_value(tf.reduce_mean(softIoU(pred_one_hot, target_one_hot)))
+                    iou.append(iou_item)
 
-                    perplexity = perplexity.detach().cpu().numpy().tolist()
-                    perplexity_list.extend(perplexity)
+                    update_error_types(error_types, pred_one_hot, target_one_hot)
 
-                else:
+                    fake_ingrs = tf.stop_gradient(fake_ingrs).numpy()
 
-                    outputs = model.sample(img_inputs, args.greedy, args.temperature, args.beam, true_ingrs)
+                    for ingr_idx, fake_ingr in enumerate(fake_ingrs):
+                        iou_item = softIoU(tf.expand_dims(pred_one_hot[ingr_idx], axis=0),
+                                           tf.get_static_value(tf.expand_dims(target_one_hot[ingr_idx], axis=0)))
+                        results_dict['ingrs'][imgid[ingr_idx]] = []
+                        results_dict['ingrs'][imgid[ingr_idx]].append(fake_ingr)
+                        results_dict['ingr_iou'][imgid[ingr_idx]] = iou_item
 
-                    if not args.recipe_only:
-                        fake_ingrs = outputs['ingr_ids']
-                        pred_one_hot = label2onehot(fake_ingrs, ingr_vocab_size - 1)
-                        target_one_hot = label2onehot(ingr_gt, ingr_vocab_size - 1)
-                        iou_item = torch.mean(softIoU(pred_one_hot, target_one_hot)).item()
-                        iou.append(iou_item)
+                if not args.ingrs_only:
+                    sampled_ids_batch = outputs['recipe_ids']
+                    sampled_ids_batch = sampled_ids_batch.cpu().detach().numpy()
 
-                        update_error_types(error_types, pred_one_hot, target_one_hot)
-
-                        fake_ingrs = fake_ingrs.detach().cpu().numpy()
-
-                        for ingr_idx, fake_ingr in enumerate(fake_ingrs):
-
-                            iou_item = softIoU(pred_one_hot[ingr_idx].unsqueeze(0),
-                                               target_one_hot[ingr_idx].unsqueeze(0)).item()
-                            results_dict['ingrs'][imgid[ingr_idx]] = []
-                            results_dict['ingrs'][imgid[ingr_idx]].append(fake_ingr)
-                            results_dict['ingr_iou'][imgid[ingr_idx]] = iou_item
-
-                    if not args.ingrs_only:
-                        sampled_ids_batch = outputs['recipe_ids']
-                        sampled_ids_batch = sampled_ids_batch.cpu().detach().numpy()
-
-                        for j, sampled_ids in enumerate(sampled_ids_batch):
-                            score = compute_score(sampled_ids)
-                            if score < th:
-                                n_rep += 1
-                            if imgid[j] not in captions.keys():
-                                results_dict['recipes'][imgid[j]] = []
-                                results_dict['recipes'][imgid[j]].append(sampled_ids)
+                    for j, sampled_ids in enumerate(sampled_ids_batch):
+                        score = compute_score(sampled_ids)
+                        if score < th:
+                            n_rep += 1
+                        if imgid[j] not in captions.keys():
+                            results_dict['recipes'][imgid[j]] = []
+                            results_dict['recipes'][imgid[j]].append(sampled_ids)
     if args.get_perplexity:
         print (len(perplexity_list))
         print (np.mean(perplexity_list))
     else:
-
         if not args.recipe_only:
             ret_metrics = {'accuracy': [], 'f1': [], 'jaccard': [], 'f1_ingredients': []}
             compute_metrics(ret_metrics, error_types, ['accuracy', 'f1', 'jaccard', 'f1_ingredients'],
@@ -196,8 +181,7 @@ def main(args):
 
 if __name__ == '__main__':
     args = get_parser()
-    torch.manual_seed(1234)
-    torch.cuda.manual_seed(1234)
+    tf.random.set_seed(1234)
     random.seed(1234)
     np.random.seed(1234)
     main(args)
