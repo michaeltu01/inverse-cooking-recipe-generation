@@ -175,25 +175,6 @@ class EpicuriousDataset(data.Dataset):
             caption.append(self.instrs_vocab(token))
         return caption
 
-class DataLoader():
-    def __init__(self, dataset, batch_size, shuffle, num_workers, drop_last, collate_fn, pin_memory):
-        '''
-        dataset: data.Dataset - the dataset to sample over
-        batch_size: int - batch size
-        shuffle: Boolean - whether to shuffle the data between epochs
-        num_workers: int - the number of subprocs (?)
-        drop_last: Boolean - whether to drop the last non-complete batch
-        collate_fn: Callable - callable to collate the data
-        pin_memory: Boolean
-        '''
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.num_workers = num_workers
-        self.drop_last = drop_last
-        self.collate_fn = collate_fn
-        self.pin_memory = pin_memory
-
 def collate_fn(data):
 
     # Sort a data list by caption length (descending order).
@@ -230,8 +211,11 @@ def get_loader(data_dir, aux_data_dir, split, maxseqlen,
                               max_num_samples=max_num_samples,
                               use_lmdb=use_lmdb,
                               suff=suff)
+    
+    if shuffle:
+        shuffled_dataset = dataset.shuffle(dataset.cardinality(), reshuffle_each_iteration=False, name='shuffle_epicurious_dataset')
+    else:
+        shuffled_dataset = dataset
+    batched_dataset = shuffled_dataset.batch(batch_size=batch_size, drop_remainder=drop_last, num_parallel_calls=num_workers, name='batch_epicurious_dataset')
 
-    data_loader = DataLoader(dataset=dataset,
-                                batch_size=batch_size, shuffle=shuffle, num_workers=num_workers,
-                                drop_last=drop_last, collate_fn=collate_fn, pin_memory=True)
-    return data_loader, dataset
+    return batched_dataset, dataset
