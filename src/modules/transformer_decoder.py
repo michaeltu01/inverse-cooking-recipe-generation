@@ -1,8 +1,8 @@
 import math
-import modules.utils as utils
+# import modules.utils as utils
 from modules.multihead_attention import MultiheadAttention
 import tensorflow as tf
-import tensorflow_addons as tfa
+# import tensorflow_addons as tfa
 import numpy as np
 import copy
 
@@ -222,7 +222,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         else:
             return x
 
-class DecoderTransformer(tf.keras.Module):
+class DecoderTransformer(tf.keras.Model):
     """Transformer decoder."""
 
     def __init__(self, embed_size, vocab_size, dropout=0.5, seq_length=20, num_instrs=15,
