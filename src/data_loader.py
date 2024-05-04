@@ -8,7 +8,7 @@ import nltk
 from PIL import Image
 from build_vocab import Vocabulary
 import random
-import lmdb
+# import lmdb
 import pickle
 
 
@@ -42,10 +42,10 @@ class EpicuriousDataset(data.Dataset):
         self.label2word = self.get_ingrs_vocab()
 
         # If a lambda function is provided, ensure that it is run correctly.
-        self.use_lmdb = use_lmdb
-        if use_lmdb:
-            self.image_file = lmdb.open(os.path.join(aux_data_dir, 'lmdb_' + split), max_readers=1, readonly=True,
-                                        lock=False, readahead=False, meminit=False)
+        # self.use_lmdb = use_lmdb
+        # if use_lmdb:
+        #     self.image_file = lmdb.open(os.path.join(aux_data_dir, 'lmdb_' + split), max_readers=1, readonly=True,
+        #                                 lock=False, readahead=False, meminit=False)
 
         # Keep only the entries in the dataset that contain an image.
         self.ids = []

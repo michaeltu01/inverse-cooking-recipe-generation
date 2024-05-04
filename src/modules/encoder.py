@@ -1,7 +1,8 @@
 import tensorflow as tf
 from tensorflow import nn
-from tensorflow.keras import Sequential
-from tensorflow.models import resnet18, resnet50, resnet101, resnet152, vgg16, vgg19, inception_v3
+from keras import Sequential
+from keras.applications.resnet import resnet18, resnet50, resnet101, resnet152
+# vgg16, vgg19, inception_v3
 import random
 import numpy as np
 
