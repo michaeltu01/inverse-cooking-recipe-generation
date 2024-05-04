@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/Users/michaelsun/cs1470/inverse-cooking-recipe-generation/src/train.py", line 387, in <module>
+    main(args)
+  File "/Users/michaelsun/cs1470/inverse-cooking-recipe-generation/src/train.py", line 122, in main
+    data_loaders[split], datasets[split] = get_loader(data_dir, args.aux_data_dir, split,
+  File "/Users/michaelsun/cs1470/inverse-cooking-recipe-generation/src/data_loader.py", line 232, in get_loader
+    dataset = EpicuriousDataset(data_dir=data_dir, aux_data_dir=aux_data_dir, split=split,
+  File "/Users/michaelsun/cs1470/inverse-cooking-recipe-generation/src/data_loader.py", line 38, in __init__
+    self.ingrs_vocab = pickle.load(open(os.path.join(aux_data_dir, suff + 'epicurious_vocab_ingrs.pkl'), 'rb'))
+FileNotFoundError: [Errno 2] No such file or directory: '../data/epicurious_vocab_ingrs.pkl'

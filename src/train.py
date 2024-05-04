@@ -130,10 +130,17 @@ def main(args):
     ingr_vocab_size = datasets[split].get_ingrs_vocab_size()
     instrs_vocab_size = datasets[split].get_instrs_vocab_size()
 
+    # x = datasets['train'].__getitem__(1)
+    x = datasets['train'][0][5]
+    tf.print(x)
+
     # Build the model
     model = get_model(args, ingr_vocab_size, instrs_vocab_size)
+
+    model = model.build()
     decay_factor = 1.0
 
+    
     # add model parameters
     if args.ingrs_only:
         params = model.ingredient_decoder.trainable_variables
