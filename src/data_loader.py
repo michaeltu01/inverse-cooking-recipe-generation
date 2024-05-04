@@ -56,7 +56,7 @@ class EpicuriousDataset(data.Dataset):
             self.ids.append(i)
 
         # Check that these instance variables are initialized properly.
-        self.root = os.path.join(data_dir, 'images', split)
+        self.root = os.path.join(data_dir, 'images')
         self.transform = transform
         self.max_num_labels = maxnumlabels
         self.maxseqlen = maxseqlen
@@ -127,7 +127,7 @@ class EpicuriousDataset(data.Dataset):
 
         # Mark the end of the ground truth labels
         ilabels_gt[pos] = self.ingrs_vocab('<end>')
-        ingrs_gt = tf.from_numpy(ilabels_gt).long()
+        ingrs_gt = tf.cast(tf.convert_to_tensor(ilabels_gt), dtype=tf.int64)
 
         if len(paths) == 0:
             path = None
@@ -137,20 +137,20 @@ class EpicuriousDataset(data.Dataset):
                 img_idx = np.random.randint(0, len(paths))
             else:
                 img_idx = 0
-            path = paths[img_idx]
-            if self.use_lmdb:
-                try:
-                    with self.image_file.begin(write=False) as txn:
-                        image = txn.get(path.encode())
-                        image = np.fromstring(image, dtype=np.uint8)
-                        image = np.reshape(image, (256, 256, 3))
-                    image = Image.fromarray(image.astype('uint8'), 'RGB')
-                except:
-                    print ("Image id not found in lmdb. Loading jpeg file...")
-                    image = Image.open(os.path.join(self.root, path[0], path[1],
-                                                    path[2], path[3], path)).convert('RGB')
-            else:
-                image = Image.open(os.path.join(self.root, path[0], path[1], path[2], path[3], path)).convert('RGB')
+            path = paths[img_idx] + ".jpg"
+            # if self.use_lmdb:
+            #     try:
+            #         with self.image_file.begin(write=False) as txn:
+            #             image = txn.get(path.encode())
+            #             image = np.fromstring(image, dtype=np.uint8)
+            #             image = np.reshape(image, (256, 256, 3))
+            #         image = Image.fromarray(image.astype('uint8'), 'RGB')
+            #     except:
+            #         print ("Image id not found in lmdb. Loading jpeg file...")
+            #         image = Image.open(os.path.join(self.root, path[0], path[1],
+            #                                         path[2], path[3], path)).convert('RGB')
+            # else:
+            image = Image.open(os.path.join(self.root, path)).convert('RGB')
             if self.transform is not None:
                 image = self.transform(image)
             image_input = image
@@ -162,7 +162,8 @@ class EpicuriousDataset(data.Dataset):
         caption.append(self.instrs_vocab('<end>'))
 
         caption = caption[0:self.maxseqlen]
-        target = tf.Tensor(caption)
+        # target = tf.Tensor(caption)
+        target = tf.convert_to_tensor(caption)
 
         return image_input, target, ingrs_gt, img_id, path, self.instrs_vocab('<pad>')
 
@@ -174,6 +175,12 @@ class EpicuriousDataset(data.Dataset):
         for token in tokens:
             caption.append(self.instrs_vocab(token))
         return caption
+    
+    def _inputs(self):
+        pass
+
+    def element_spec(self):
+        pass
 
 class DataLoader():
     def __init__(self, dataset, batch_size, shuffle, num_workers, drop_last, collate_fn, pin_memory):

@@ -36,7 +36,7 @@ class LearnedPositionalEmbedding(tf.keras.layers.Layer):
     """
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx, left_pad):
-        super().__init__(num_embeddings, embedding_dim, padding_idx)
+        super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.padding_idx = padding_idx
@@ -239,7 +239,7 @@ class DecoderTransformer(tf.keras.Model):
             self.embed_positions = None
         self.normalize_inputs = normalize_inputs
         self.embed_scale = math.sqrt(embed_size)
-        self.layers = [TransformerDecoderLayer(embed_size, attention_nheads, dropout, normalize_before, last_ln) for _ in range(num_layers)]
+        self.td_layers = [TransformerDecoderLayer(embed_size, attention_nheads, dropout, normalize_before, last_ln) for _ in range(num_layers)]
         self.linear = tf.keras.layers.Dense(vocab_size)
 
     def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None):
@@ -283,7 +283,7 @@ class DecoderTransformer(tf.keras.Model):
         # B x T x C -> T x B x C
         x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
 
-        for p, layer in enumerate(self.layers):
+        for p, layer in enumerate(self.td_layers):
             x  = layer(
                 x,
                 ingr_features,

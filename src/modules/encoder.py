@@ -11,8 +11,12 @@ class EncoderCNN(tf.keras.layers.Layer):
         """Load the pretrained ResNet-152 and replace top fc layer."""
         super(EncoderCNN, self).__init__()
         self.resnet = ResNet101(weights='imagenet' if pretrained else None, include_top=False)
-        modules = list(self.resnet.children())[:-2]  # delete the last fc layer.
-        self.resnet = Sequential(*modules)
+        # modules = list(self.resnet.children())[:-2]  # delete the last fc layer.
+        for layer in self.resnet.layers:
+            layer.trainable = False
+
+        self.resnet = tf.keras.Model(inputs=self.resnet.input, outputs=self.resnet.layers[-3].output)
+        # self.resnet = Sequential(*modules)
         # Original pytorch layers
         # nn.Conv2D(resnet.fc.in_features, embed_size, kernel_size=1, padding=0)
         # nn.Dropout2d(dropout)
