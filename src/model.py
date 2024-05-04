@@ -159,7 +159,7 @@ class InverseCookingModel(tf.keras.Model):
 
             # cardinality penalty
             # NOTE: Replaced torch.abs -> tf.math.abs
-            losses['card_penalty'] = tf.math.abs(tf.reduce_sum(ingr_probs*target_one_hot, axis=1) - tf.reduce_sum(target_one_hot, axis=1) + \
+            losses['card_penalty'] = tf.math.abs(tf.reduce_sum(ingr_probs*target_one_hot, axis=1)) - tf.reduce_sum(target_one_hot, axis=1) + \
                                      tf.math.abs(tf.reduce_sum(ingr_probs*(1-target_one_hot), axis=1))
 
             eos_loss = self.crit_eos(eos, tf.cast(target_eos, tf.float32))
