@@ -3,7 +3,7 @@ import os
 import ntpath
 import time
 import glob
-from scipy.misc import imresize
+# from scipy.misc import imresize
 # import torchvision.utils as vutils
 import tensorflow as tf
 from operator import itemgetter

@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/michaelsun/cs1470/inverse-cooking-recipe-generation/src/train.py", line 382, in <module>
+    main(args)
+  File "/Users/michaelsun/cs1470/inverse-cooking-recipe-generation/src/train.py", line 122, in main
+    data_loaders[split], datasets[split] = get_loader(data_dir, args.aux_data_dir, split,
+  File "/Users/michaelsun/cs1470/inverse-cooking-recipe-generation/src/data_loader.py", line 226, in get_loader
+    dataset = EpicuriousDataset(data_dir=data_dir, aux_data_dir=aux_data_dir, split=split,
+TypeError: Can't instantiate abstract class EpicuriousDataset with abstract methods _inputs, element_spec
