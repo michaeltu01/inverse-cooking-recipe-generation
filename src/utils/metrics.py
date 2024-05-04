@@ -4,7 +4,7 @@ import math
 import numpy as np
 import tensorflow as tf
 
-class MaskedCrossEntropyCriterion(tf.keras.Loss):
+class MaskedCrossEntropyCriterion(tf.keras.losses.Loss):
     def __init__(self, ignore_index=[-100], reduce=None):
         super(MaskedCrossEntropyCriterion, self).__init__()
         self.padding_idx = ignore_index

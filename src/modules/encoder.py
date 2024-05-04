@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import nn
 from keras import Sequential
-from keras.applications.resnet import resnet18, resnet50, resnet101, resnet152
+from keras.applications import ResNet101
 # vgg16, vgg19, inception_v3
 import random
 import numpy as np
@@ -10,15 +10,14 @@ class EncoderCNN(tf.keras.layers.Layer):
     def __init__(self, embed_size, dropout=0.5, image_model='resnet101', pretrained=True):
         """Load the pretrained ResNet-152 and replace top fc layer."""
         super(EncoderCNN, self).__init__()
-        resnet = globals()[image_model](pretrained=pretrained)
-        modules = list(resnet.children())[:-2]  # delete the last fc layer.
+        self.resnet = ResNet101(weights='imagenet' if pretrained else None, include_top=False)
+        modules = list(self.resnet.children())[:-2]  # delete the last fc layer.
         self.resnet = Sequential(*modules)
         # Original pytorch layers
         # nn.Conv2D(resnet.fc.in_features, embed_size, kernel_size=1, padding=0)
         # nn.Dropout2d(dropout)
         self.linear = Sequential([tf.keras.layers.Conv2D(embed_size, kernel_size=1, padding='valid'),
                                   tf.keras.layers.Dropout(dropout)])
-
     # Original pytorch
     # def forward(self, images, keep_cnn_gradients=False):
     #     """Extract feature vectors from input images."""

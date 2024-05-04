@@ -1,7 +1,6 @@
 import tensorflow as tf
-from tensorflow import nn
 
-class MultiheadAttention(nn.Module):
+class MultiheadAttention(tf.keras.layers.Layer):
     """Multi-headed attention.
     See "Attention Is All You Need" for more details
     """
