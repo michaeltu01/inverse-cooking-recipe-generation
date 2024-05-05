@@ -88,8 +88,11 @@ class EpicuriousDataset(data.Dataset):
         img_id = sample['id']
         captions = sample['tokenized']
         paths = sample['images'][0:self.maxnumims]
-
         idx = index
+
+        valid_paths = [path for path in paths if '#NAME?' not in path]
+        if not valid_paths:
+            return None  
 
         # Get the labels (ingredients) and title of the recipe
         labels = self.dataset[self.ids[idx]]['ingredients']
@@ -204,27 +207,103 @@ class DataLoader():
         self.drop_last = drop_last
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
+        self.index = 0
 
+    def __iter__(self):
+        self.index = 0
+        if self.shuffle:
+            self.indices = np.random.permutation(len(self.dataset))
+        else:
+            self.indices = np.arange(len(self.dataset))
+        return self
+
+    # def __next__(self):
+    #     if self.index >= len(self.dataset):
+    #         raise StopIteration
+    #     start = self.index
+    #     self.index += self.batch_size
+    #     if self.index > len(self.dataset):
+    #         if self.drop_last:
+    #             raise StopIteration
+    #         self.index = len(self.dataset)
+    #     batch_indices = self.indices[start:self.index]
+    #     batch = [self.dataset[i] for i in batch_indices]
+        
+    #     if self.collate_fn:
+    #         batch = self.collate_fn(batch)
+    #     return batch
+
+    def __next__(self):
+        if self.index >= len(self.dataset):
+            raise StopIteration
+        
+        batch = []
+        while len(batch) < self.batch_size:
+            if self.index >= len(self.dataset):
+                if self.drop_last or not batch:
+                    raise StopIteration
+                else:
+                    break  # Use whatever is already collected in the batch
+            # Get the index of the next item
+            idx = self.indices[self.index]
+            self.index += 1
+            
+            # Fetch the data item from the dataset
+            data_item = self.dataset[idx]
+            if data_item is not None:
+                batch.append(data_item)
+
+        if self.collate_fn and batch:
+            return self.collate_fn(batch)
+        return batch
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.dataset) // self.batch_size
+        else:
+            return (len(self.dataset) + self.batch_size - 1) // self.batch_size
+
+
+# def collate_fn(data):
+
+#     # Sort a data list by caption length (descending order).
+#     # data.sort(key=lambda x: len(x[2]), reverse=True)
+#     image_input, captions, ingrs_gt, img_id, path, pad_value = zip(*data)
+
+#     # Merge images (from tuple of 3D tensor to 4D tensor).
+
+#     image_input = tf.stack(image_input, 0)
+#     ingrs_gt = tf.stack(ingrs_gt, 0)
+
+#     # Merge captions (from tuple of 1D tensor to 2D tensor).
+#     lengths = [len(cap) for cap in captions]
+#     targets = tf.cast(tf.ones([len(captions), max(lengths)], dtype=tf.int64), dtype=tf.int64) * pad_value[0]
+
+#     for i, cap in enumerate(captions):
+#         end = lengths[i]
+#         targets[i, :end] = cap[:end]
+
+#     return image_input, targets, ingrs_gt, img_id, path
 def collate_fn(data):
-
-    # Sort a data list by caption length (descending order).
-    # data.sort(key=lambda x: len(x[2]), reverse=True)
     image_input, captions, ingrs_gt, img_id, path, pad_value = zip(*data)
-
-    # Merge images (from tuple of 3D tensor to 4D tensor).
 
     image_input = tf.stack(image_input, 0)
     ingrs_gt = tf.stack(ingrs_gt, 0)
 
-    # Merge captions (from tuple of 1D tensor to 2D tensor).
-    lengths = [len(cap) for cap in captions]
-    targets = tf.cast(tf.ones(len(captions), max(lengths)), dtype=tf.int64) * pad_value[0]
 
-    for i, cap in enumerate(captions):
-        end = lengths[i]
-        targets[i, :end] = cap[:end]
+    padded_captions = []
+    max_length = max(len(cap) for cap in captions)
 
-    return image_input, targets, ingrs_gt, img_id, path
+    for cap in captions:
+        padding_size = max_length - len(cap)
+        padding = tf.fill([padding_size], pad_value[0])
+        padded_caption = tf.concat([cap, padding], axis=0)
+        padded_captions.append(padded_caption)
+
+    padded_captions = tf.stack(padded_captions)
+
+    return image_input, padded_captions, ingrs_gt, img_id, path
+
 
 
 def get_loader(data_dir, aux_data_dir, split, maxseqlen,

@@ -40,7 +40,7 @@ class EncoderCNN(tf.keras.layers.Layer):
         else:
             raw_conv_feats = tf.stop_gradient(self.resnet(images))
         features = self.linear(raw_conv_feats)
-        features = tf.reshape(features, [features.size[0], features.size[1], -1])
+        features = tf.reshape(features, [tf.shape(features)[0], tf.shape(features)[1], -1])
         return features
 
 

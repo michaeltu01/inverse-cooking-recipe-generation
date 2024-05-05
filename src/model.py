@@ -7,19 +7,32 @@ from utils.metrics import softIoU, MaskedCrossEntropyCriterion
 # NOTE: Replaced torch check for cuda
 device = tf.device('/GPU:0' if tf.config.experimental.list_physical_devices('GPU') else '/CPU:0')
 
-def label2onehot(labels, pad_value):
+# def label2onehot(labels, pad_value):
 
-    # input labels to one hot vector
-    inp_ = tf.expand_dims(labels, 2)
-    # one_hot = torch.FloatTensor(labels.size(0), labels.size(1), pad_value + 1).zero_().to(device)
-    one_hot = tf.zeros((labels.shape[0], labels.shape[1], pad_value + 1))
-    one_hot.scatter_(2, inp_, 1)
-    one_hot, _ = one_hot.max(dim=1)
-    # remove pad position
-    one_hot = one_hot[:, :-1]
-    # eos position is always 0
-    one_hot[:, 0] = 0
+#     # input labels to one hot vector
+#     inp_ = tf.expand_dims(labels, 2)
+#     # one_hot = torch.FloatTensor(labels.size(0), labels.size(1), pad_value + 1).zero_().to(device)
+#     one_hot = tf.zeros((labels.shape[0], labels.shape[1], pad_value + 1))
+#     one_hot.scatter_(2, inp_, 1)
+#     one_hot, _ = one_hot.max(dim=1)
+#     # remove pad position
+#     one_hot = one_hot[:, :-1]
+#     # eos position is always 0
+#     one_hot[:, 0] = 0
 
+#     return one_hot
+
+def label2onehot(labels, pad_value, label_smoothing=None):
+    one_hot = tf.one_hot(labels, depth=pad_value+1, dtype=tf.float32)
+    one_hot = tf.transpose(one_hot, perm=[0, 2, 1])
+    
+    if label_smoothing is not None:
+        one_hot = (1 - label_smoothing) * one_hot + label_smoothing / (pad_value + 1)
+    
+    one_hot = tf.reduce_max(one_hot, axis=-1)
+    one_hot = tf.cast(one_hot, dtype=tf.int32)
+    one_hot = tf.one_hot(one_hot, depth=2, dtype=tf.float32)
+    
     return one_hot
 
 def mask_from_eos(ids, eos_value, mult_before=True):
@@ -117,7 +130,7 @@ class InverseCookingModel(tf.keras.Model):
 
         losses = {}
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
-        target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value)
+        target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value, self.label_smoothing)
 
         # ingredient prediction
         if not self.recipe_only:

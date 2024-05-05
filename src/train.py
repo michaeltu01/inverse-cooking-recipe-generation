@@ -127,6 +127,9 @@ def main(args):
     model = get_model(args, ingr_vocab_size, instrs_vocab_size)
     decay_factor = 1.0
     
+    dummy_inputs, dummy_captions, dummy_ingr_gt, _, _ = next(iter(data_loaders['train']))
+    dummy_outputs = model(dummy_inputs, dummy_captions, dummy_ingr_gt, training=False)
+
     # add model parameters
     if args.ingrs_only:
         params = model.ingredient_decoder.trainable_variables
