@@ -151,8 +151,12 @@ class EpicuriousDataset(data.Dataset):
             #                                         path[2], path[3], path)).convert('RGB')
             # else:
             image = Image.open(os.path.join(self.root, path)).convert('RGB')
+            # if len(self.transform) != 0:
+            #     for func in enumerate(self.transform):
+            #         image = func(image)
             if self.transform is not None:
                 image = self.transform(image)
+                
             image_input = image
 
         # Convert caption (string) to word ids.

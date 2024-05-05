@@ -12,6 +12,7 @@ import sys
 import json
 import time
 from utils.tb_visualizer import Visualizer
+import tensorflow_addons as tfa
 from model import mask_from_eos, label2onehot
 from utils.metrics import softIoU, compute_metrics, update_error_types
 import random
@@ -58,27 +59,6 @@ def make_dir(d):
     if not os.path.exists(d):
         os.makedirs(d)
 
-def load_and_preprocess_image(image_path, is_train, image_size, crop_size):
-    image = tf.io.read_file(image_path)
-    image = tf.image.decode_jpeg(image, channels=3)
-    image = tf.image.resize(image, [image_size, image_size])
-
-    if is_train:
-        image = tf.image.random_flip_left_right(image)
-        image = tf.image.random_crop(image, size=[crop_size, crop_size, 3])
-        image = tf.image.rot90(image, k=tf.random.uniform(shape=[], minval=0, maxval=4, dtype=tf.int32))
-        image = tf.image.pad_to_bounding_box(image, 10, 10, crop_size + 20, crop_size + 20)
-        image = tf.image.crop_to_bounding_box(image, 10, 10, crop_size, crop_size)
-    else:
-        image = tf.image.resize_with_crop_or_pad(image, crop_size, crop_size)
-
-    # Normalize image
-    image = tf.cast(image, tf.float32) / 255.0
-    image -= tf.constant([0.485, 0.456, 0.406])
-    image /= tf.constant([0.229, 0.224, 0.225])
-    
-    return image
-
 def main(args):
 
     # Create model directory & other aux folders for logging
@@ -116,13 +96,26 @@ def main(args):
     datasets = {}
 
     data_dir = args.epicurious_dir
+    
+    for split in ['train', 'val']: 
 
-    for split in ['train', 'val']:
+        if split == 'train':
+            transform = tf.keras.Sequential([tf.keras.layers.Resizing(args.image_size, args.image_size),
+                                     tf.keras.layers.RandomFlip("horizontal"),
+                                     tf.keras.layers.RandomCrop(args.crop_size, args.crop_size),
+                                     tf.keras.layers.Rescaling(1./255),
+                                     tf.keras.layers.Normalization(mean=[0.485, 0.456, 0.406], variance=[0.229**2, 0.224**2, 0.225**2])])
+        elif split == 'val':
+            transform = tf.keras.Sequential([tf.keras.layers.Resizing(args.image_size, args.image_size),
+                                        tf.keras.layers.CenterCrop(args.crop_size, args.crop_size),
+                                        tf.keras.layers.Normalization(mean=[0.485, 0.456, 0.406], variance=[0.229**2, 0.224**2, 0.225**2])])
+        # composed_transform = tfa.image.compose_transforms(transform_list)
+
         max_num_samples = max(args.max_eval, args.batch_size) if split == 'val' else -1
         data_loaders[split], datasets[split] = get_loader(data_dir, args.aux_data_dir, split,
                                                         args.maxseqlen, args.maxnuminstrs,
                                                         args.maxnumlabels, args.maxnumims,
-                                                        None, args.batch_size, shuffle=(split == 'train'),
+                                                        transform, args.batch_size, shuffle=(split == 'train'),
                                                         num_workers=args.num_workers,
                                                         drop_last=True, max_num_samples=max_num_samples,
                                                         use_lmdb=args.use_lmdb, suff=args.suff)
@@ -130,16 +123,9 @@ def main(args):
     ingr_vocab_size = datasets[split].get_ingrs_vocab_size()
     instrs_vocab_size = datasets[split].get_instrs_vocab_size()
 
-    # x = datasets['train'].__getitem__(1)
-    x = datasets['train'][0][5]
-    tf.print(x)
-
     # Build the model
     model = get_model(args, ingr_vocab_size, instrs_vocab_size)
-
-    model = model.build()
     decay_factor = 1.0
-
     
     # add model parameters
     if args.ingrs_only:
@@ -149,7 +135,7 @@ def main(args):
     else:
         params = model.recipe_decoder.trainable_variables + model.ingredient_decoder.trainable_variables \
                 + model.ingredient_encoder.trainable_variables
-
+    print(params)
     # only train the linear layer in the encoder if we are not transfering from another model
     if args.transfer_from == '':
         params += model.image_encoder.linear.trainable_variables
