@@ -17,22 +17,8 @@ class EncoderCNN(tf.keras.layers.Layer):
 
         self.resnet = tf.keras.Model(inputs=self.resnet.input, outputs=self.resnet.layers[-3].output)
         # self.resnet = Sequential(*modules)
-        # Original pytorch layers
-        # nn.Conv2D(resnet.fc.in_features, embed_size, kernel_size=1, padding=0)
-        # nn.Dropout2d(dropout)
         self.linear = Sequential([tf.keras.layers.Conv2D(embed_size, kernel_size=1, padding='valid'),
                                   tf.keras.layers.Dropout(dropout)])
-    # Original pytorch
-    # def forward(self, images, keep_cnn_gradients=False):
-    #     """Extract feature vectors from input images."""
-    #     if keep_cnn_gradients:
-    #         raw_conv_feats = self.resnet(images)
-    #     else:
-    #         with torch.no_grad():
-    #             raw_conv_feats = self.resnet(images)
-    #     features = self.linear(raw_conv_feats)
-    #     features = features.view(features.size(0), features.size(1), -1)
-    #     return features
 
     def call(self, images, keep_cnn_gradients=False):
         if keep_cnn_gradients:
@@ -59,13 +45,13 @@ class EncoderLabels(tf.keras.layers.Layer):
         self.dropout = dropout
         self.embed_size = embed_size
 
-    def call(self, x, onehot_flag=False):
+    def call(self, x, onehot_flag=False, training=True):
         if onehot_flag:
             embeddings = tf.matmul(x, self.linear.weights[0]) # may need to transpose weight matrix
         else:
             embeddings = self.linear(x)
-        # not sure if should switch to using a dropout layer instead
-        embeddings = tf.nn.dropout(embeddings, self.dropout)
+        dropout = tf.keras.layers.Dropout(self.dropout)
+        embeddings = dropout(embeddings, training)
         embeddings = tf.transpose(embeddings, perm=[0, 2, 1])
 
         return embeddings

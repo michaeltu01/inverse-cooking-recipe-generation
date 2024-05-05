@@ -128,6 +128,9 @@ def main(args):
     decay_factor = 1.0
     
     dummy_inputs, dummy_captions, dummy_ingr_gt, _, _ = next(iter(data_loaders['train']))
+    # print("inputs", dummy_inputs)
+    # print("captions", dummy_captions)
+    # print("ingrs", dummy_ingr_gt)
     dummy_outputs = model(dummy_inputs, dummy_captions, dummy_ingr_gt, training=False)
 
     # add model parameters

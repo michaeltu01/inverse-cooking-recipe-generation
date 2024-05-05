@@ -144,7 +144,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         if self.use_last_ln:
             self.last_ln = tf.keras.layers.LayerNormalization(epsilon=1e-5)
 
-    def call(self, x, ingr_features, ingr_mask, incremental_state, img_features):
+    def call(self, x, ingr_features, ingr_mask, incremental_state, img_features, training=False):
 
         # self attention
         residual = x
@@ -158,7 +158,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
             need_weights=False,
         )
         dropout_layer = tf.keras.layers.Dropout(self.dropout)
-        x = dropout_layer(x, training=self.training)
+        x = dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
 
@@ -197,16 +197,16 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
                                     incremental_state=incremental_state,
                                     static_kv=True,
             )
-        x = dropout_layer(x, p=self.dropout, training=self.training)
+        x = dropout_layer(x, p=self.dropout, training=training)
         x = residual + x
         x = self.maybe_layer_norm(1, x, after=True)
 
         residual = x
         x = self.maybe_layer_norm(-1, x, before=True)
         x = self.fc1(x)
-        x = dropout_layer(x, training=self.training)
+        x = dropout_layer(x, training=training)
         x = self.fc2(x)
-        x = dropout_layer(x, training=self.training)
+        x = dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(-1, x, after=True)
 
@@ -229,7 +229,7 @@ class DecoderTransformer(tf.keras.Model):
                  attention_nheads=16, pos_embeddings=True, num_layers=8, learned=True, normalize_before=True,
                  normalize_inputs=False, last_ln=False, scale_embed_grad=False):
         super(DecoderTransformer, self).__init__()
-        self.dropout = tf.keras.layers.Dropout(dropout)
+        self.dropout = dropout
         self.seq_length = seq_length * num_instrs
         self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5))
         self.final_ln = tf.keras.layers.LayerNormalization()
@@ -238,12 +238,15 @@ class DecoderTransformer(tf.keras.Model):
         else:
             self.embed_positions = None
         self.normalize_inputs = normalize_inputs
+        if self.normalize_inputs:
+            self.layer_norms_in = [tf.keras.layers.LayerNormalization(epsilon=1e-5) for i in range(3)]
+
         self.embed_scale = math.sqrt(embed_size)
         self.td_layers = [TransformerDecoderLayer(embed_size, attention_nheads, dropout, normalize_before, last_ln) for _ in range(num_layers)]
         self.linear = tf.keras.layers.Dense(vocab_size)
 
-    def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None):
-
+    def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None, training = False):
+        print("ingr features", ingr_features)
         if ingr_features is not None:
             ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
             ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
@@ -251,8 +254,8 @@ class DecoderTransformer(tf.keras.Model):
                 self.layer_norms_in[0](ingr_features)
 
         if img_features is not None:
-            ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
-            ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
+            img_features = tf.transpose(img_features, perm=[0, 2, 1])
+            img_features = tf.transpose(img_features, perm=[1, 0, 2])
             if self.normalize_inputs:
                 self.layer_norms_in[1](img_features)
 
@@ -278,7 +281,7 @@ class DecoderTransformer(tf.keras.Model):
         if self.normalize_inputs:
             x = self.layer_norms_in[2](x)
 
-        x = tf.keras.layers.Dropout(self.dropout)(x, training=self.training)
+        x = tf.keras.layers.Dropout(self.dropout)(x, training=training)
 
         # B x T x C -> T x B x C
         x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
@@ -286,10 +289,10 @@ class DecoderTransformer(tf.keras.Model):
         for p, layer in enumerate(self.td_layers):
             x  = layer(
                 x,
-                ingr_features,
-                ingr_mask,
-                incremental_state,
-                img_features
+                ingr_features=ingr_features,
+                ingr_mask=ingr_mask,
+                incremental_state=incremental_state,
+                img_features=img_features
             )
             
         # T x B x C -> B x T x C

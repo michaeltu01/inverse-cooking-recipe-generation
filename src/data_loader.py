@@ -240,7 +240,6 @@ class DataLoader():
     def __next__(self):
         if self.index >= len(self.dataset):
             raise StopIteration
-        
         batch = []
         while len(batch) < self.batch_size:
             if self.index >= len(self.dataset):

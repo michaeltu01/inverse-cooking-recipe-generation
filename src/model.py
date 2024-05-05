@@ -22,18 +22,34 @@ device = tf.device('/GPU:0' if tf.config.experimental.list_physical_devices('GPU
 
 #     return one_hot
 
-def label2onehot(labels, pad_value, label_smoothing=None):
-    one_hot = tf.one_hot(labels, depth=pad_value+1, dtype=tf.float32)
-    one_hot = tf.transpose(one_hot, perm=[0, 2, 1])
+# def label2onehot(labels, pad_value, label_smoothing=None):
+#     one_hot = tf.one_hot(labels, depth=pad_value+1, dtype=tf.float32)
+#     one_hot = tf.transpose(one_hot, perm=[0, 2, 1])
     
-    if label_smoothing is not None:
-        one_hot = (1 - label_smoothing) * one_hot + label_smoothing / (pad_value + 1)
+#     if label_smoothing is not None:
+#         one_hot = (1 - label_smoothing) * one_hot + label_smoothing / (pad_value + 1)
     
-    one_hot = tf.reduce_max(one_hot, axis=-1)
-    one_hot = tf.cast(one_hot, dtype=tf.int32)
-    one_hot = tf.one_hot(one_hot, depth=2, dtype=tf.float32)
+#     one_hot = tf.reduce_max(one_hot, axis=-1)
+#     one_hot = tf.cast(one_hot, dtype=tf.int32)
+#     one_hot = tf.one_hot(one_hot, depth=2, dtype=tf.float32)
     
+#     return one_hot
+
+def label2onehot(labels, pad_value):
+    # print(labels)
+    # print("One hot encoding in progress...")
+    # print("labels shape", labels.shape)
+    # input labels to one hot vector
+    inp_ = tf.expand_dims(labels, axis=-1)
+    one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=-1)
+    # print("one hot", one_hot)
+    # one_hot = tf.squeeze(one_hot, axis=1)
+    # remove pad position
+    one_hot = one_hot[:, :-1]
+    # eos position is always 0
+    one_hot = tf.concat([tf.zeros_like(one_hot[:, :1]), one_hot[:, 1:]], axis=1)
     return one_hot
+
 
 def mask_from_eos(ids, eos_value, mult_before=True):
     # mask = torch.ones(ids,)).to(device).byte()
@@ -126,17 +142,27 @@ class InverseCookingModel(tf.keras.Model):
         targets = captions[:, 1:]
         targets = tf.reshape(targets, [-1])
 
-        print("model call image inputs", img_inputs)
-        img_features = self.image_encoder(img_inputs, keep_cnn_gradients)
+        img_features = self.image_encoder(img_inputs, keep_cnn_gradients=keep_cnn_gradients)
 
         losses = {}
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
-        target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value, self.label_smoothing)
+        target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value)
+        print("pad value", self.pad_value)
+        print("target ingrs", target_ingrs)
+        print("target one_hot", target_one_hot)
+        print("smooth (?) target one_hot", target_one_hot_smooth)
 
         # ingredient prediction
         if not self.recipe_only:
-            target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
-            target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / tf.shape(target_one_hot_smooth)[-1]
+
+            mask = tf.cast(target_one_hot_smooth == 1, dtype=tf.float32)
+            target_one_hot_smooth = mask * (1 - self.label_smoothing) + (1 - mask) * target_one_hot_smooth
+
+            target_one_hot_smooth = tf.where(target_one_hot_smooth == 0,
+                                 tf.cast(self.label_smoothing / tf.cast(tf.shape(target_one_hot_smooth)[-1], dtype=tf.float32), dtype=tf.float32),
+                                 target_one_hot_smooth)
+            # target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
+            # target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / tf.shape(target_one_hot_smooth)[-1]
 
             # decode ingredients with transformer
             # autoregressive mode for ingredient decoder
