@@ -12,7 +12,7 @@ import sys
 import json
 import time
 from utils.tb_visualizer import Visualizer
-import tensorflow_addons as tfa
+# import tensorflow_addons as tfa
 from model import mask_from_eos, label2onehot
 from utils.metrics import softIoU, compute_metrics, update_error_types
 import random

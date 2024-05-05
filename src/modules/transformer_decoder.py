@@ -41,7 +41,7 @@ class LearnedPositionalEmbedding(tf.keras.layers.Layer):
         self.embedding_dim = embedding_dim
         self.padding_idx = padding_idx
         self.left_pad = left_pad
-        self.embeddings = self.add_weight("embeddings", shape=[num_embeddings, embedding_dim], initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embedding_dim**-0.5))
+        self.embeddings = self.add_weight(name="embeddings", shape=(num_embeddings, embedding_dim), initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embedding_dim**-0.5))
 
     def call(self, input, incremental_state=None):
         """Input is expected to be of size [bsz x seqlen]."""

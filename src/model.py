@@ -126,6 +126,7 @@ class InverseCookingModel(tf.keras.Model):
         targets = captions[:, 1:]
         targets = tf.reshape(targets, [-1])
 
+        print("model call image inputs", img_inputs)
         img_features = self.image_encoder(img_inputs, keep_cnn_gradients)
 
         losses = {}

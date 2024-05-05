@@ -28,7 +28,7 @@ class EpicuriousDataset(data.Dataset):
             maxnuminstrs (int): Maximum number of instructions.
             maxnumlabels (int): Maximum number of labels.
             maxnumims (int): Maximum number of images.
-            transform (torchvision.transforms.Transform): Image transformation.
+            transform (Tensorflow layers): Image transformation layers.
             max_num_samples (int): Maximum number of samples to load (-1 means load all).
             use_lmdb (bool): Whether to use LMDB for image loading.
             suff (str): Suffix for auxiliary data files.
@@ -157,6 +157,10 @@ class EpicuriousDataset(data.Dataset):
             # if len(self.transform) != 0:
             #     for func in enumerate(self.transform):
             #         image = func(image)
+
+            # NOTE: Convert image to a Tensor
+            image = tf.convert_to_tensor(tf.keras.utils.img_to_array(image)) # defaults to float32 Tensor
+
             if self.transform is not None:
                 image = self.transform(image)
                 
