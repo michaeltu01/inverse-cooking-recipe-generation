@@ -207,28 +207,12 @@ def main(args):
             keep_cnn_gradients = True
 
         for split in ['train', 'val']:
-
-            if split == 'train':
-                model.train()
-            else:
-                model.eval()
             total_step = len(data_loaders[split])
             loader = iter(data_loaders[split])
-
-            total_loss_dict = {'recipe_loss': [], 'ingr_loss': [],
-                               'eos_loss': [], 'loss': [],
-                               'iou': [], 'perplexity': [], 'iou_sample': [],
-                               'f1': [],
-                               'card_penalty': []}
-
-            error_types = {'tp_i': 0, 'fp_i': 0, 'fn_i': 0, 'tn_i': 0,
-                           'tp_all': 0, 'fp_all': 0, 'fn_all': 0}
-
             start = time.time()
-
             for i in range(total_step):
 
-                img_inputs, captions, ingr_gt, img_ids, paths = loader.next()
+                img_inputs, captions, ingr_gt, img_ids, paths = next(loader)
 
                 img_inputs = tf.convert_to_tensor(img_inputs.numpy())
                 captions = tf.convert_to_tensor(captions.numpy())
@@ -237,8 +221,26 @@ def main(args):
 
                 loss_dict = {}
 
+
+                if split == 'train':
+                    model(img_inputs, captions, ingr_gt, sample=False, training = True)
+                else:
+                    model.eval()
+                total_step = len(data_loaders[split])
+                loader = iter(data_loaders[split])
+
+                total_loss_dict = {'recipe_loss': [], 'ingr_loss': [],
+                                'eos_loss': [], 'loss': [],
+                                'iou': [], 'perplexity': [], 'iou_sample': [],
+                                'f1': [],
+                                'card_penalty': []}
+
+                error_types = {'tp_i': 0, 'fp_i': 0, 'fn_i': 0, 'tn_i': 0,
+                            'tp_all': 0, 'fp_all': 0, 'fn_all': 0}
+                
+
                 if split == 'val':
-                    predictions, outputs = model(img_inputs, captions, ingr_gt, training=False)
+                    losses = model(img_inputs, captions, ingr_gt, training=False)
 
                     if not args.recipe_only:
                         ingr_ids_greedy = outputs['ingr_ids']
@@ -258,12 +260,13 @@ def main(args):
 
                 else:
                     with tf.GradientTape() as tape:
-                        loss = model(img_inputs, captions, ingr_gt, training=True)
-                    gradients = tape.gradient(loss, model.trainable_variables)
+                        losses = model(img_inputs, captions, ingr_gt, training=True)
+                    gradients = tape.gradient(losses, model.trainable_variables)
+                    print(gradients, "gradient")
                     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
                 if not args.ingrs_only:
-                    recipe_loss = loss['recipe_loss']
+                    recipe_loss = losses['recipe_loss']
 
                     recipe_loss = tf.reshape(recipe_loss, tf.shape(true_caps_batch))
                     non_pad_mask = tf.cast(tf.not_equal(true_caps_batch, instrs_vocab_size - 1), tf.float32)
@@ -310,13 +313,14 @@ def main(args):
                 for key in loss_dict.keys():
                     if key not in total_loss_dict:
                         total_loss_dict[key] = []
-                    total_loss_dict[key].append(loss_dict[key].numpy())
+                    total_loss_dict[key].append(loss_dict[key])
 
                 if split == 'train':
                     with tf.GradientTape() as tape:
-                        total_loss = sum(loss_dict.values())
+                        total_loss = tf.convert_to_tensor(sum(loss_dict.values()))
                     gradients = tape.gradient(total_loss, model.trainable_variables)
-                    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+                    zipped_grads = zip(gradients, model.trainable_variables)
+                    optimizer.apply_gradients(zipped_grads)
 
                 if args.log_step != -1 and i % args.log_step == 0:
                     elapsed_time = time.time() - start

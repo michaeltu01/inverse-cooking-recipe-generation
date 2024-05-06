@@ -37,18 +37,15 @@ device = tf.device('/GPU:0' if tf.config.experimental.list_physical_devices('GPU
 #     return one_hot
 
 def label2onehot(labels, pad_value):
-    # print(labels)
-    # print("One hot encoding in progress...")
-    # print("labels shape", labels.shape)
     # input labels to one hot vector
     inp_ = tf.expand_dims(labels, axis=-1)
     one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=-1)
-    # print("one hot", one_hot)
     # one_hot = tf.squeeze(one_hot, axis=1)
     # remove pad position
     one_hot = one_hot[:, :-1]
     # eos position is always 0
     one_hot = tf.concat([tf.zeros_like(one_hot[:, :1]), one_hot[:, 1:]], axis=1)
+    print(tf.shape(one_hot), "onehot shape")
     return one_hot
 
 
@@ -136,7 +133,7 @@ class InverseCookingModel(tf.keras.Model):
         self.label_smoothing = label_smoothing
 
     # Changed to a more familiar 'call' function, instead of 'forward'
-    def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False):
+    def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False, training = False):
         if sample:
             return self.sample(img_inputs, greedy=True)
 
@@ -190,13 +187,14 @@ class InverseCookingModel(tf.keras.Model):
             ingr_probs = tf.reduce_max(ingr_probs, axis=1)
 
             # ignore predicted ingredients after eos in ground truth
-            ingr_ids = tf.where(target_one_hot_smooth == 0,
+            ingr_ids = tf.where(mask_perminv == 0,
                                 self.pad_value,
                                 ingr_ids)
 
             ingr_loss = self.crit_ingr(ingr_probs, target_one_hot_smooth)
+
             # NOTE: Replaced torch.mean with tf.reduce_mean
-            ingr_loss = tf.reduce_mean(ingr_loss, axis=-1)
+            ingr_loss = tf.math.reduce_mean(ingr_loss)
 
             losses['ingr_loss'] = ingr_loss
 
