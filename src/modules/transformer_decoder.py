@@ -340,13 +340,17 @@ class DecoderTransformer(tf.keras.Model):
                 else:
                     # ensure no repetitions in sampling if replacement==False
                     batch_ind = [j for j in range(fs) if sampled_ids[i][j] != 0]
-                    sampled_ids_new = list(tf.gather(sampled_ids[i], batch_ind))
-                    print("new sample ids", sampled_ids_new)
-                    predicted_mask = np.zeros_like(outputs)
-                    for b_ind, sample_id in zip(batch_ind, sampled_ids_new):
-                        predicted_mask[b_ind, sample_id] = -np.inf
-                    # predicted_mask[batch_ind, sampled_ids_new] = float('-inf')
-                    predicted_mask = tf.convert_to_tensor(predicted_mask)
+                    print("batch indices", batch_ind)
+                    print("sample ids", sampled_ids)
+                    if len(batch_ind) != 0:
+                        sampled_ids_new = tf.gather(sampled_ids[i], batch_ind)
+                        print("new sample ids", sampled_ids_new)
+                        predicted_mask = np.zeros_like(outputs)
+                        for b_ind, sample_id in zip(batch_ind, sampled_ids_new):
+                            predicted_mask[b_ind, sample_id] = -np.inf
+                        predicted_mask = tf.convert_to_tensor(predicted_mask)
+                    else:
+                        predicted_mask = tf.zeros_like(outputs)
 
                 # mask previously selected ids
                 outputs += predicted_mask
