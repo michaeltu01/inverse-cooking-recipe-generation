@@ -183,9 +183,10 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
 
         else:
             # attention on concatenation of encoder_out and encoder_aux, query self attn (x)
+            img_features = tf.transpose(img_features, perm=[2,1,0])
             kv = tf.concat((img_features, ingr_features), axis=0)
-            mask = tf.concat([tf.zeros((img_features.shape[1], img_features.shape[0]), dtype=tf.int32), ingr_mask], axis=1)
-            attn_output = self.cond_att(x, kv, kv, attention_mask=mask)
+            mask = tf.concat([tf.zeros((img_features.shape[1], img_features.shape[0]), dtype=tf.int32), tf.cast(ingr_mask, tf.int32)], axis=1)
+            # attn_output = self.cond_att(x, kv, kv, attention_mask=mask)
             x, _ = self.cond_att(query=x,
                                     key=kv,
                                     value=kv,

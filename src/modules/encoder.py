@@ -12,11 +12,11 @@ class EncoderCNN(tf.keras.layers.Layer):
         super(EncoderCNN, self).__init__()
         self.resnet = ResNet101(weights='imagenet' if pretrained else None, include_top=False)
         # modules = list(self.resnet.children())[:-2]  # delete the last fc layer.
-        self.resnet = tf.keras.Model(inputs=self.resnet.input, outputs=self.resnet.layers[-2].output)
+        # self.resnet = tf.keras.Model(inputs=self.resnet.input, outputs=self.resnet.layers.output)
         for layer in self.resnet.layers:
             layer.trainable = False
         # self.resnet = Sequential(*modules)
-        self.linear = Sequential([tf.keras.layers.Conv2D(filters=embed_size, kernel_size=1, padding='valid'),
+        self.linear = Sequential([tf.keras.layers.Conv2D(filters=embed_size, kernel_size=1, strides=(1,1), padding='valid'),
                                   tf.keras.layers.Dropout(dropout)])
 
     def call(self, images, keep_cnn_gradients=False):
@@ -28,8 +28,8 @@ class EncoderCNN(tf.keras.layers.Layer):
         print("raw conv feats", raw_conv_feats.shape)
         features = self.linear(raw_conv_feats)
         print("features shape after convolution", features.shape)
-        features = tf.reshape(features, [tf.shape(features)[0], tf.shape(features)[1], -1])
-        print("internal CNN features shape", features.shape)
+        features = tf.reshape(features, [tf.shape(features)[0], -1, tf.shape(features)[-1]])
+        print("returning this shape", features.shape)
         return features
 
 
