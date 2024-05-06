@@ -52,7 +52,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
     #         nn.init.constant_(self.in_proj_bias, 0.)
     #         nn.init.constant_(self.out_proj.bias, 0.)
 
-    def forward(self, query, key, value, key_padding_mask=None, training=False, 
+    def call(self, query, key, value, key_padding_mask=None, training=False, 
                 mask_future_timesteps=False):
         """Input shape: Time x Batch x Channel
         Self-attention can be implemented by passing in the same arguments for
@@ -65,8 +65,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
         batch_size, seq_length, embed_dim = query.shape
         assert embed_dim == self.embed_dim
 
-
-        qkv = tf.linalg.matmul(query, self.in_proj_weight) + self.in_proj_bias
+        qkv = tf.linalg.matmul(query, self.in_proj_weight, transpose_b=True) + self.in_proj_bias
         q, k, v = tf.split(qkv, 3, axis=-1)
         q *= self.scaling
 

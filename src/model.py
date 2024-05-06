@@ -147,10 +147,10 @@ class InverseCookingModel(tf.keras.Model):
         losses = {}
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
         target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value)
-        print("pad value", self.pad_value)
-        print("target ingrs", target_ingrs)
-        print("target one_hot", target_one_hot)
-        print("smooth (?) target one_hot", target_one_hot_smooth)
+        # print("pad value", self.pad_value)
+        # print("target ingrs", target_ingrs)
+        # print("target one_hot", target_one_hot)
+        # print("smooth (?) target one_hot", target_one_hot_smooth)
 
         # ingredient prediction
         if not self.recipe_only:

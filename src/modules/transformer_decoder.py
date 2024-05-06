@@ -153,9 +153,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
             query=x,
             key=x,
             value=x,
-            mask_future_timesteps=True,
-            incremental_state=incremental_state,
-            need_weights=False,
+            mask_future_timesteps=True
         )
         dropout_layer = tf.keras.layers.Dropout(self.dropout)
         x = dropout_layer(x, training=training)
@@ -171,9 +169,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
             x, _ = self.cond_att(query=x,
                                     key=img_features,
                                     value=img_features,
-                                    key_padding_mask=None,
-                                    incremental_state=incremental_state,
-                                    static_kv=True,
+                                    key_padding_mask=None
                                     )
         elif img_features is None:
             x, _ = self.cond_att(query=x,
@@ -197,7 +193,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
                                     incremental_state=incremental_state,
                                     static_kv=True,
             )
-        x = dropout_layer(x, p=self.dropout, training=training)
+        x = dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(1, x, after=True)
 
@@ -299,7 +295,7 @@ class DecoderTransformer(tf.keras.Model):
         x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
 
         x = self.linear(x)
-        _, predicted = tf.argmax(axis=-1)
+        predicted = tf.argmax(x, axis=-1)
 
         return x, predicted
 
@@ -328,7 +324,8 @@ class DecoderTransformer(tf.keras.Model):
 
         for i in range(self.seq_length):
             # forward
-            outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sampled_ids, axis=1), img_features)
+            print("sampled ids", sampled_ids)
+            outputs, _ = self.call(ingr_features=ingr_features, ingr_mask=ingr_mask, captions=tf.stack(sampled_ids, axis=1), img_features=img_features)
             outputs = tf.squeeze(outputs, axis=1)
             if not replacement:
                 # predicted mask
