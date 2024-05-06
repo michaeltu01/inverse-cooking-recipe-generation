@@ -129,11 +129,11 @@ def main(args):
     keep_cnn_gradients = False #NEW
     decay_factor = 1.0
     
-    # dummy_inputs, dummy_captions, dummy_ingr_gt, _, _ = next(iter(data_loaders['train']))
-    # print("inputs", tf.shape(dummy_inputs))
-    # print("captions", tf.shape(dummy_captions))
-    # print("ingrs", tf.shape(dummy_ingr_gt))
-    # dummy_outputs = model(dummy_inputs, dummy_captions, dummy_ingr_gt, training=False)
+    dummy_inputs, dummy_captions, dummy_ingr_gt, _, _ = next(iter(data_loaders['train']))
+    print("inputs", tf.shape(dummy_inputs))
+    print("captions", tf.shape(dummy_captions))
+    print("ingrs", tf.shape(dummy_ingr_gt))
+    dummy_outputs = model(dummy_inputs, dummy_captions, dummy_ingr_gt, training=False)
 
     # add model parameters
     if args.ingrs_only:
@@ -262,6 +262,7 @@ def main(args):
                     with tf.GradientTape() as tape:
                         tape.watch(model.trainable_variables)
                         losses = model(img_inputs, captions, ingr_gt, training=True)
+                        print(losses, "losses")
                     # gradients = tape.gradient(losses, model.trainable_variables)
                     # optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
@@ -318,6 +319,8 @@ def main(args):
                     # with tf.GradientTape() as tape:
                     #     total_loss = tf.convert_to_tensor(sum(loss_dict.values()))
                     gradients = tape.gradient(total_loss, params)
+                    for grad, var in zip(gradients, model.trainable_variables):
+                        print(f"{var.name}, grad mean: {tf.reduce_mean(grad) if grad is not None else 'No gradient'}")
                     model.optimizer.apply_gradients(zip(gradients, params))
 
                 if args.log_step != -1 and i % args.log_step == 0:

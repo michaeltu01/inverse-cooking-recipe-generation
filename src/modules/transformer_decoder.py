@@ -246,6 +246,8 @@ class DecoderTransformer(tf.keras.Model):
         self.linear = tf.keras.layers.Dense(vocab_size-1)
 
     def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None, training = False):
+        print(ingr_features, "ingr feat")
+        print(ingr_mask, "ingr mask")
         if ingr_features is not None:
             ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
             ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
@@ -274,6 +276,7 @@ class DecoderTransformer(tf.keras.Model):
         # embed tokens and positions
         x = self.embed_scale * self.embed_tokens(captions)
 
+
         if self.embed_positions is not None:
             x += positions
 
@@ -285,7 +288,7 @@ class DecoderTransformer(tf.keras.Model):
         # B x T x C -> T x B x C
         # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
         x = tf.transpose(x, perm=[1, 0, 2])
-
+        print(x, "x")
         for p, layer in enumerate(self.td_layers):
             x  = layer(
                 x,
@@ -294,11 +297,11 @@ class DecoderTransformer(tf.keras.Model):
                 incremental_state=incremental_state,
                 img_features=img_features
             )
-            
+        
+        
         # T x B x C -> B x T x C
         # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
         x = tf.transpose(x, perm=[1, 0, 2])
-
         x = self.linear(x)
         predicted = tf.argmax(x, axis=-1)
 
