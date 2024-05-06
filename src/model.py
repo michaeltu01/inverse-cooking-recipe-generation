@@ -142,7 +142,9 @@ class InverseCookingModel(tf.keras.Model):
         targets = captions[:, 1:]
         targets = tf.reshape(targets, [-1])
 
+        print("img_inputs in image encoder", img_inputs)
         img_features = self.image_encoder(img_inputs, keep_cnn_gradients=keep_cnn_gradients)
+        print("image features shape out of encoder", img_features.shape)
 
         losses = {}
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
@@ -200,7 +202,6 @@ class InverseCookingModel(tf.keras.Model):
 
             # cardinality penalty
             # NOTE: Replaced torch.abs -> tf.math.abs
-            print("target one hot shape", target_one_hot.shape)
             losses['card_penalty'] = tf.math.abs(tf.reduce_sum(ingr_probs*target_one_hot, axis=1)) - tf.reduce_sum(target_one_hot, axis=1) + \
                                      tf.math.abs(tf.reduce_sum(ingr_probs*(1-target_one_hot), axis=1))
 
