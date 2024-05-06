@@ -3,6 +3,7 @@ from modules.encoder import EncoderCNN, EncoderLabels
 from modules.transformer_decoder import DecoderTransformer
 from modules.multihead_attention import MultiheadAttention
 from utils.metrics import softIoU, MaskedCrossEntropyCriterion
+import numpy as np
 
 # NOTE: Replaced torch check for cuda
 device = tf.device('/GPU:0' if tf.config.experimental.list_physical_devices('GPU') else '/CPU:0')
@@ -55,8 +56,8 @@ def mask_from_eos(ids, eos_value, mult_before=True):
     # mask = torch.ones(ids,)).to(device).byte()
     # mask_aux = torch.ones(ids.size(0)).to(device).byte()
 
-    mask = tf.ones_like(ids)
-    mask_aux = tf.ones((ids.shape[0]))
+    mask = np.ones(ids.shape)
+    mask_aux = np.ones(ids.shape[0])
 
     # find eos in ingredient prediction
     for idx in range(tf.shape(ids)[1]):
@@ -65,11 +66,11 @@ def mask_from_eos(ids, eos_value, mult_before=True):
             continue
         if mult_before:
             mask[:, idx] = mask[:, idx] * mask_aux
-            mask_aux = mask_aux * (ids[:, idx] != eos_value)
+            mask_aux = mask_aux * (ids[:, idx] != eos_value).numpy()
         else:
-            mask_aux = mask_aux * (ids[:, idx] != eos_value)
+            mask_aux = mask_aux * (ids[:, idx] != eos_value).numpy()
             mask[:, idx] = mask[:, idx] * mask_aux
-    return mask
+    return tf.convert_to_tensor(mask)
 
 def get_model(args, ingr_vocab_size, instrs_vocab_size):
 
@@ -183,17 +184,19 @@ class InverseCookingModel(tf.keras.Model):
 
             # select transformer steps to pool from
             mask_perminv = mask_from_eos(target_ingrs, eos_value=0, mult_before=False)
-            ingr_probs = ingr_logits * tf.expand_dim(tf.cast(mask_perminv, tf.float32), axis=-1)
+            ingr_probs = ingr_logits * tf.expand_dims(tf.cast(mask_perminv, tf.float32), axis=-1)
 
             # NOTE: Replaced torch.max with tf.reduce_max
-            ingr_probs = tf.reduce_max(ingr_probs, dim=1)
+            ingr_probs = tf.reduce_max(ingr_probs, axis=1)
 
             # ignore predicted ingredients after eos in ground truth
-            ingr_ids[mask_perminv == 0] = self.pad_value
+            ingr_ids = tf.where(target_one_hot_smooth == 0,
+                                self.pad_value,
+                                ingr_ids)
 
             ingr_loss = self.crit_ingr(ingr_probs, target_one_hot_smooth)
             # NOTE: Replaced torch.mean with tf.reduce_mean
-            ingr_loss = tf.reduce_mean(ingr_loss, dim=-1)
+            ingr_loss = tf.reduce_mean(ingr_loss, axis=-1)
 
             losses['ingr_loss'] = ingr_loss
 
