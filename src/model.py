@@ -39,13 +39,15 @@ device = tf.device('/GPU:0' if tf.config.experimental.list_physical_devices('GPU
 def label2onehot(labels, pad_value):
     # input labels to one hot vector
     inp_ = tf.expand_dims(labels, axis=-1)
-    one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=-1)
-    # one_hot = tf.squeeze(one_hot, axis=1)
+    one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=2)
+    one_hot = tf.reduce_max(one_hot, axis=1)
     # remove pad position
     one_hot = one_hot[:, :-1]
     # eos position is always 0
     one_hot = tf.concat([tf.zeros_like(one_hot[:, :1]), one_hot[:, 1:]], axis=1)
-    print(tf.shape(one_hot), "onehot shape")
+    # one hot shape: (batch_size, vocab_size, 1)
+    one_hot = tf.squeeze(one_hot, axis=-1)
+    # one hot shape: (batch_size, vocab_size)
     return one_hot
 
 
