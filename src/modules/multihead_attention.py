@@ -210,7 +210,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
         if self._mask is None:
             self._mask = tf.linalg.band_part(self.fill_with_neg_inf(tf.zeros_like(tensor)), 0, -1)
         if tf.shape(self._mask)[0] < dim:
-            self._mask = tf.linalg.band_part(self.fill_with_neg_inf(tf.resize(self._mask.numpy, (dim, dim))), 0, -1)
+            self._mask = tf.linalg.band_part(self.fill_with_neg_inf(tf.resize(self._mask, (dim, dim))), 0, -1)
         return self._mask[:dim, :dim]
 
     # def reorder_incremental_state(self, incremental_state, new_order):
