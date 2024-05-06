@@ -319,13 +319,15 @@ class DecoderTransformer(tf.keras.Model):
 
         first_word = tf.fill([fs], first_token_value)
         first_word = tf.cast(first_word, tf.int32)
-        sampled_ids = [first_word]
+        sampled_ids = tf.convert_to_tensor([first_word])
         logits = []
 
         for i in range(self.seq_length):
             # forward
-            print("sampled ids", sampled_ids)
-            outputs, _ = self.call(ingr_features=ingr_features, ingr_mask=ingr_mask, captions=tf.stack(sampled_ids, axis=1), img_features=img_features)
+            caption_ids = [tf.cast(id, tf.int32) for id in sampled_ids]
+            captions = tf.stack(caption_ids, axis=1)
+
+            outputs, _ = self.call(ingr_features=ingr_features, ingr_mask=ingr_mask, captions=captions, img_features=img_features, incremental_state=incremental_state)
             outputs = tf.squeeze(outputs, axis=1)
             if not replacement:
                 # predicted mask
@@ -333,8 +335,8 @@ class DecoderTransformer(tf.keras.Model):
                     predicted_mask = tf.zeros_like(outputs)
                 else:
                     # ensure no repetitions in sampling if replacement==False
-                    batch_ind = [j for j in range(fs) if sampled_ids[i][j] != 0]
-                    sampled_ids_new = sampled_ids[i][batch_ind]
+                    batch_ind = tf.cast([j for j in range(fs) if sampled_ids[i][j] != 0], dtype=tf.int32)
+                    sampled_ids_new = tf.gather(sampled_ids[i], batch_ind)
                     predicted_mask[batch_ind, sampled_ids_new] = float('-inf')
 
                 # mask previously selected ids
@@ -354,7 +356,8 @@ class DecoderTransformer(tf.keras.Model):
                 predicted = tf.random.categorical(tf.math.log(prob_prev_topk), 1)
                 predicted = tf.gather_nd(indices, predicted, batch_dims=1)
 
-            sampled_ids.append(predicted)
+            # sampled_ids.append(predicted)
+            tf.stack(sampled_ids, predicted)
 
         sampled_ids = tf.stack(sampled_ids[1:], axis=1)
         logits = tf.stack(logits, axis=1)
