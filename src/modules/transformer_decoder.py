@@ -21,7 +21,7 @@ def make_positions(tensor, padding_idx, left_pad):
     range_buf = tf.range(padding_idx + 1, max_pos, dtype=tensor.dtype)
     #make_positions.range_buf = make_positions.range_buf.type_as(tensor)
     mask = tf.not_equal(tensor, padding_idx)
-    positions = range_buf[:tensor.size(1)].expand_as(tensor)
+    positions = tf.broadcast_to(range_buf[:tensor.shape[1]], tensor.shape)
     if left_pad:
         positions = positions - mask.size(1) + tf.reduce_sum(tf.cast(mask, tf.int32), axis=1, keepdims=True)
 
@@ -230,7 +230,7 @@ class DecoderTransformer(tf.keras.Model):
         self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5))
         self.final_ln = tf.keras.layers.LayerNormalization()
         if pos_embeddings:
-            self.embed_positions = PositionalEmbedding(1024, embed_size, 0, left_pad=False, learned=learned)
+            self.embed_positions = PositionalEmbedding(1024, embed_size, padding_idx=0, left_pad=False, learned=learned)
         else:
             self.embed_positions = None
         self.normalize_inputs = normalize_inputs
@@ -239,10 +239,9 @@ class DecoderTransformer(tf.keras.Model):
 
         self.embed_scale = math.sqrt(embed_size)
         self.td_layers = [TransformerDecoderLayer(embed_size, attention_nheads, dropout, normalize_before, last_ln) for _ in range(num_layers)]
-        self.linear = tf.keras.layers.Dense(vocab_size)
+        self.linear = tf.keras.layers.Dense(vocab_size-1)
 
     def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None, training = False):
-        print("ingr features", ingr_features)
         if ingr_features is not None:
             ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
             ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
@@ -269,9 +268,7 @@ class DecoderTransformer(tf.keras.Model):
             captions = captions[:, -1:]
 
         # embed tokens and positions
-        print("captions shape", captions.shape)
         x = self.embed_scale * self.embed_tokens(captions)
-        print("shape after embedding", x.shape)
 
         if self.embed_positions is not None:
             x += positions

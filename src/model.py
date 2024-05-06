@@ -37,18 +37,17 @@ device = tf.device('/GPU:0' if tf.config.experimental.list_physical_devices('GPU
 #     return one_hot
 
 def label2onehot(labels, pad_value):
-    # print(labels)
-    # print("One hot encoding in progress...")
-    # print("labels shape", labels.shape)
     # input labels to one hot vector
     inp_ = tf.expand_dims(labels, axis=-1)
-    one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=-1)
-    # print("one hot", one_hot)
-    # one_hot = tf.squeeze(one_hot, axis=1)
+    one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=2)
+    one_hot = tf.reduce_max(one_hot, axis=1)
     # remove pad position
     one_hot = one_hot[:, :-1]
     # eos position is always 0
     one_hot = tf.concat([tf.zeros_like(one_hot[:, :1]), one_hot[:, 1:]], axis=1)
+    # one hot shape: (batch_size, vocab_size, 1)
+    one_hot = tf.squeeze(one_hot, axis=-1)
+    # one hot shape: (batch_size, vocab_size)
     return one_hot
 
 
@@ -156,12 +155,12 @@ class InverseCookingModel(tf.keras.Model):
         # ingredient prediction
         if not self.recipe_only:
 
-            mask = tf.cast(target_one_hot_smooth == 1, dtype=tf.float32)
-            target_one_hot_smooth = mask * (1 - self.label_smoothing) + (1 - mask) * target_one_hot_smooth
+            # mask = tf.cast(target_one_hot_smooth == 1, dtype=tf.float32)
+            # target_one_hot_smooth = mask * (1 - self.label_smoothing) + (1 - mask) * target_one_hot_smooth
 
             target_one_hot_smooth = tf.where(target_one_hot_smooth == 0,
                                  tf.cast(self.label_smoothing / tf.cast(tf.shape(target_one_hot_smooth)[-1], dtype=tf.float32), dtype=tf.float32),
-                                 target_one_hot_smooth)
+                                 1-self.label_smoothing)
             # target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
             # target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / tf.shape(target_one_hot_smooth)[-1]
 
@@ -190,18 +189,18 @@ class InverseCookingModel(tf.keras.Model):
             ingr_probs = tf.reduce_max(ingr_probs, axis=1)
 
             # ignore predicted ingredients after eos in ground truth
-            ingr_ids = tf.where(target_one_hot_smooth == 0,
+            ingr_ids = tf.where(mask_perminv == 0,
                                 self.pad_value,
                                 ingr_ids)
 
-            ingr_loss = self.crit_ingr(ingr_probs, target_one_hot_smooth)
-            # NOTE: Replaced torch.mean with tf.reduce_mean
-            ingr_loss = tf.reduce_mean(ingr_loss, axis=-1)
+            ingr_loss = self.crit_ingr(target_one_hot_smooth, ingr_probs)
+            # NOTE: Replaced torch.mean entirely since layer already averages the sum over batch size
 
             losses['ingr_loss'] = ingr_loss
 
             # cardinality penalty
             # NOTE: Replaced torch.abs -> tf.math.abs
+            print("target one hot shape", target_one_hot.shape)
             losses['card_penalty'] = tf.math.abs(tf.reduce_sum(ingr_probs*target_one_hot, axis=1)) - tf.reduce_sum(target_one_hot, axis=1) + \
                                      tf.math.abs(tf.reduce_sum(ingr_probs*(1-target_one_hot), axis=1))
 

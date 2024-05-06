@@ -39,8 +39,8 @@ class EncoderLabels(tf.keras.layers.Layer):
             embeddinglayer = tf.keras.layers.Embedding(num_classes, embed_size, mask_zero=True, weights=embed_weights)
         else:
             embeddinglayer = tf.keras.layers.Embedding(num_classes, embed_size, mask_zero=True)
-        # self.pad_value = num_classes - 1
-        self.pad_value = 0
+        self.pad_value = num_classes - 1
+        # self.pad_value = 0
         self.linear = embeddinglayer
         self.dropout = dropout
         self.embed_size = embed_size
@@ -51,7 +51,7 @@ class EncoderLabels(tf.keras.layers.Layer):
         else:
             embeddings = self.linear(x)
         dropout = tf.keras.layers.Dropout(self.dropout)
-        embeddings = dropout(embeddings, training)
+        embeddings = dropout(embeddings, training=training)
         embeddings = tf.transpose(embeddings, perm=[0, 2, 1])
 
         return embeddings
