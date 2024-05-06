@@ -171,7 +171,7 @@ class InverseCookingModel(tf.keras.Model):
                                                                    first_token_value=0, replacement=False)
 
             # NOTE: torch.nn.functional.softmax -> tf.nn.softmax
-            ingr_logits = tf.nn.softmax(ingr_logits, dim=-1)
+            ingr_logits = tf.nn.softmax(ingr_logits, axis=-1)
 
             # find idxs for eos ingredient
             # eos probability is the one assigned to the first position of the softmax

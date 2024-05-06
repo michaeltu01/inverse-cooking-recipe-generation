@@ -29,19 +29,13 @@ def compute_score(sampled_ids):
 
 def label2onehot(labels, pad_value):
     # input labels to one hot vector
-    inp_ = tf.expand_dims(labels, 2)
-    # one_hot = torch.FloatTensor(labels.size(0), labels.size(1), pad_value + 1).zero_().to(device)
-    one_hot = tf.zeros(shape=[labels.size(0), labels.size(1), pad_value + 1], dtype=tf.dtypes.float32)
-    # one_hot.scatter_(2, inp_, 1)
-    # https://stackoverflow.com/questions/70276246/match-pytorch-scatter-output-in-tensorflow
-    one_hot = tf.tensor_scatter_nd_update(one_hot, inp_, 1)
-    one_hot, _ = tf.reduce_max(one_hot, axis=1)
+    inp_ = tf.expand_dims(labels, axis=-1)
+    one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=-1)
     # remove pad and eos position
-    one_hot = one_hot[:, 1:-1]
-    one_hot[:, 0] = 0
+    one_hot = one_hot[:, :-1]
+    one_hot = tf.concat([tf.zeros_like(one_hot[:, :1]), one_hot[:, 1:]], axis=1)
 
     return one_hot
-
 
 def main(args):
     where_to_save = os.path.join(args.save_dir, args.project_name, args.model_name)

@@ -269,7 +269,9 @@ class DecoderTransformer(tf.keras.Model):
             captions = captions[:, -1:]
 
         # embed tokens and positions
+        print("captions shape", captions.shape)
         x = self.embed_scale * self.embed_tokens(captions)
+        print("shape after embedding", x.shape)
 
         if self.embed_positions is not None:
             x += positions
@@ -280,7 +282,8 @@ class DecoderTransformer(tf.keras.Model):
         x = tf.keras.layers.Dropout(self.dropout)(x, training=training)
 
         # B x T x C -> T x B x C
-        x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
+        # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
+        x = tf.transpose(x, perm=[1, 0, 2])
 
         for p, layer in enumerate(self.td_layers):
             x  = layer(
@@ -292,7 +295,8 @@ class DecoderTransformer(tf.keras.Model):
             )
             
         # T x B x C -> B x T x C
-        x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
+        # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
+        x = tf.transpose(x, perm=[1, 0, 2])
 
         x = self.linear(x)
         predicted = tf.argmax(x, axis=-1)
@@ -318,8 +322,8 @@ class DecoderTransformer(tf.keras.Model):
         first_word = np.ones(fs)*first_token_value
 
         first_word = tf.fill([fs], first_token_value)
-        first_word = tf.cast(first_word, tf.int32)
-        sampled_ids = tf.convert_to_tensor([first_word])
+        first_word = tf.cast(first_word, tf.int64)
+        sampled_ids = [first_word]
         logits = []
 
         for i in range(self.seq_length):
@@ -335,9 +339,14 @@ class DecoderTransformer(tf.keras.Model):
                     predicted_mask = tf.zeros_like(outputs)
                 else:
                     # ensure no repetitions in sampling if replacement==False
-                    batch_ind = tf.cast([j for j in range(fs) if sampled_ids[i][j] != 0], dtype=tf.int32)
-                    sampled_ids_new = tf.gather(sampled_ids[i], batch_ind)
-                    predicted_mask[batch_ind, sampled_ids_new] = float('-inf')
+                    batch_ind = [j for j in range(fs) if sampled_ids[i][j] != 0]
+                    sampled_ids_new = list(tf.gather(sampled_ids[i], batch_ind))
+                    print("new sample ids", sampled_ids_new)
+                    predicted_mask = np.zeros_like(outputs)
+                    for b_ind, sample_id in zip(batch_ind, sampled_ids_new):
+                        predicted_mask[b_ind, sample_id] = -np.inf
+                    # predicted_mask[batch_ind, sampled_ids_new] = float('-inf')
+                    predicted_mask = tf.convert_to_tensor(predicted_mask)
 
                 # mask previously selected ids
                 outputs += predicted_mask
@@ -348,16 +357,21 @@ class DecoderTransformer(tf.keras.Model):
                 predicted = tf.argmax(outputs_prob, axis=1)
             else:
                 k = 10
-                outputs_prob = outputs / temperature
+                # outputs_prob = outputs / temperature
+                outputs_prob = tf.squeeze(outputs, axis=1) / temperature
                 outputs_prob = tf.nn.softmax(outputs_prob, axis=-1)
 
                 # top k random sampling
                 prob_prev_topk, indices = tf.nn.top_k(outputs_prob, k=k)
-                predicted = tf.random.categorical(tf.math.log(prob_prev_topk), 1)
-                predicted = tf.gather_nd(indices, predicted, batch_dims=1)
+                # predicted = tf.random.categorical(tf.math.log(prob_prev_topk), 1)
+                predicted = tf.reshape(tf.random.categorical(tf.math.log(prob_prev_topk), 1), -1)
+                # predicted = tf.gather_nd(indices, predicted, batch_dims=1)
+                predicted = tf.gather_nd(indices, predicted, batch_dims=1)[:, 0]
 
-            # sampled_ids.append(predicted)
-            tf.stack(sampled_ids, predicted)
+            sampled_ids.append(predicted)
+            # print(sampled_ids.shape)
+            # print(predicted.shape)
+            # tf.concat([sampled_ids, predicted], axis=0)
 
         sampled_ids = tf.stack(sampled_ids[1:], axis=1)
         logits = tf.stack(logits, axis=1)
@@ -371,7 +385,7 @@ class DecoderTransformer(tf.keras.Model):
         # create dummy previous word
         fs = tf.shape(ingr_features)[0] if ingr_features is not None else tf.shape(img_features)[0]
         first_word = tf.fill([fs], first_token_value)
-        first_word = tf.cast(first_word, tf.int32)
+        first_word = tf.cast(first_word, tf.int64)
 
         sequences = [[[first_word], 0, {}, False, 1]]
         finished = []
@@ -381,7 +395,7 @@ class DecoderTransformer(tf.keras.Model):
             all_candidates = []
             for rem in range(len(sequences)):
                 incremental = sequences[rem][2]
-                outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features)
+                outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features, incremental)
                 outputs = tf.squeeze(outputs, axis=1)
                 if not replacement:
                     # predicted mask
@@ -402,11 +416,11 @@ class DecoderTransformer(tf.keras.Model):
                 # score is [ batch x beam ] and every element is a scalar
                 # incremental is [batch x beam ] and every element is a dict
 
-
                 for bid in range(beam):
                     tokens = sequences[rem][0] + [indices[:, bid]]
-                    score = sequences[rem][1] + probs[:, bid]
-                    if indices[:,bid] == last_token_value:
+                    # score = sequences[rem][1] + probs[:, bid]
+                    score = sequences[rem][1] + tf.get_static_value(tf.squeeze(probs[:, bid]))
+                    if tf.get_static_value(indices[:,bid]) == last_token_value:
                         finished.append([tokens, score, None, True, sequences[rem][-1] + 1])
                     else:
                         all_candidates.append([tokens, score, incremental, False, sequences[rem][-1] + 1])
