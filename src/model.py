@@ -140,7 +140,9 @@ class InverseCookingModel(tf.keras.Model):
         targets = captions[:, 1:]
         targets = tf.reshape(targets, [-1])
 
+        print("img_inputs in image encoder", img_inputs)
         img_features = self.image_encoder(img_inputs, keep_cnn_gradients=keep_cnn_gradients)
+        print("image features shape out of encoder", img_features.shape)
 
         losses = {}
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
@@ -153,12 +155,12 @@ class InverseCookingModel(tf.keras.Model):
         # ingredient prediction
         if not self.recipe_only:
 
-            mask = tf.cast(target_one_hot_smooth == 1, dtype=tf.float32)
-            target_one_hot_smooth = mask * (1 - self.label_smoothing) + (1 - mask) * target_one_hot_smooth
+            # mask = tf.cast(target_one_hot_smooth == 1, dtype=tf.float32)
+            # target_one_hot_smooth = mask * (1 - self.label_smoothing) + (1 - mask) * target_one_hot_smooth
 
             target_one_hot_smooth = tf.where(target_one_hot_smooth == 0,
                                  tf.cast(self.label_smoothing / tf.cast(tf.shape(target_one_hot_smooth)[-1], dtype=tf.float32), dtype=tf.float32),
-                                 target_one_hot_smooth)
+                                 1-self.label_smoothing)
             # target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
             # target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / tf.shape(target_one_hot_smooth)[-1]
 
