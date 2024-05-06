@@ -94,7 +94,7 @@ def main(args):
     # model.load_state_dict(torch.load(model_path, map_location=map_loc))
     model.load_weights(model_path)
 
-    model.eval()
+    # model.eval()
     results_dict = {'recipes': {}, 'ingrs': {}, 'ingr_iou': {}}
     captions = {}
     iou = []
@@ -103,7 +103,7 @@ def main(args):
     n_rep, th = 0, 0.3
 
     for i, (img_inputs, true_caps_batch, ingr_gt, imgid, impath) in tqdm(enumerate(data_loader)):
-        true_caps_shift = true_caps_batch.clone()[:, 1:].contiguous()
+        true_caps_shift = tf.identity(true_caps_batch[:, 1:])
         true_ingrs = ingr_gt if args.use_true_ingrs else None
         for gens in range(args.numgens):
             if args.get_perplexity:
@@ -139,7 +139,7 @@ def main(args):
 
                 if not args.ingrs_only:
                     sampled_ids_batch = outputs['recipe_ids']
-                    sampled_ids_batch = sampled_ids_batch.cpu().detach().numpy()
+                    sampled_ids_batch = tf.stop_gradient(sampled_ids_batch).numpy()
 
                     for j, sampled_ids in enumerate(sampled_ids_batch):
                         score = compute_score(sampled_ids)

@@ -8,34 +8,6 @@ import numpy as np
 # NOTE: Replaced torch check for cuda
 device = tf.device('/GPU:0' if tf.config.experimental.list_physical_devices('GPU') else '/CPU:0')
 
-# def label2onehot(labels, pad_value):
-
-#     # input labels to one hot vector
-#     inp_ = tf.expand_dims(labels, 2)
-#     # one_hot = torch.FloatTensor(labels.size(0), labels.size(1), pad_value + 1).zero_().to(device)
-#     one_hot = tf.zeros((labels.shape[0], labels.shape[1], pad_value + 1))
-#     one_hot.scatter_(2, inp_, 1)
-#     one_hot, _ = one_hot.max(dim=1)
-#     # remove pad position
-#     one_hot = one_hot[:, :-1]
-#     # eos position is always 0
-#     one_hot[:, 0] = 0
-
-#     return one_hot
-
-# def label2onehot(labels, pad_value, label_smoothing=None):
-#     one_hot = tf.one_hot(labels, depth=pad_value+1, dtype=tf.float32)
-#     one_hot = tf.transpose(one_hot, perm=[0, 2, 1])
-    
-#     if label_smoothing is not None:
-#         one_hot = (1 - label_smoothing) * one_hot + label_smoothing / (pad_value + 1)
-    
-#     one_hot = tf.reduce_max(one_hot, axis=-1)
-#     one_hot = tf.cast(one_hot, dtype=tf.int32)
-#     one_hot = tf.one_hot(one_hot, depth=2, dtype=tf.float32)
-    
-#     return one_hot
-
 def label2onehot(labels, pad_value):
     # input labels to one hot vector
     inp_ = tf.expand_dims(labels, axis=-1)
@@ -98,6 +70,19 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                       normalize_inputs=True,
                                       last_ln=True,
                                       scale_embed_grad=False)
+    
+    decoder.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay),
+        loss='binary_crossentropy',
+        metrics=[softIoU]
+    )
+
+    ingr_decoder.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay),
+        loss='binary_crossentropy',
+        metrics=[softIoU]
+    )
+
     # recipe loss
     criterion = MaskedCrossEntropyCriterion(ignore_index=[instrs_vocab_size-1], reduce=False)
 
@@ -111,6 +96,14 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                 pad_value=ingr_vocab_size-1,
                                 ingrs_only=args.ingrs_only, recipe_only=args.recipe_only,
                                 label_smoothing=args.label_smoothing_ingr)
+    
+    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay)
+    
+    model.compile(
+        optimizer=optimizer,
+        loss='binary_crossentropy',
+        metrics=[softIoU]
+    )
 
     return model
 
@@ -142,9 +135,9 @@ class InverseCookingModel(tf.keras.Model):
         targets = captions[:, 1:]
         targets = tf.reshape(targets, [-1])
 
-        print("img_inputs in image encoder", img_inputs)
+        # print("img_inputs in image encoder", img_inputs)
         img_features = self.image_encoder(img_inputs, keep_cnn_gradients=keep_cnn_gradients)
-        print("image features shape out of encoder", img_features.shape)
+        # print("image features shape out of encoder", img_features.shape)
 
         losses = {}
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
@@ -243,12 +236,13 @@ class InverseCookingModel(tf.keras.Model):
 
         target_ingr_mask = tf.expand_dims(tf.cast(target_ingr_mask, tf.float32), axis=1)
 
-        outputs, ids = self.recipe_decoder(target_ingr_feats, target_ingr_mask, captions, img_features)
+        outputs, ids = self.recipe_decoder(target_ingr_feats, target_ingr_mask, captions, img_features, training=training)
 
         outputs = outputs[:, :-1, :]
-        outputs = outputs.view(tf.shape(outputs)[0] * tf.shape(outputs)[1], -1)
+        outputs = tf.reshape(outputs, [tf.shape(outputs)
+        [0] * tf.shape(outputs)[1], -1])
 
-        loss = self.crit(outputs, targets)
+        loss = self.crit(outputs, targets) # MaskedCrossEntropyCriterion takes outputs, then targets
 
         losses['recipe_loss'] = loss
 

@@ -2,7 +2,6 @@ import tensorflow as tf
 from tensorflow import nn
 from keras import Sequential
 from keras.applications import ResNet101
-# vgg16, vgg19, inception_v3
 import random
 import numpy as np
 
@@ -20,16 +19,16 @@ class EncoderCNN(tf.keras.layers.Layer):
                                   tf.keras.layers.Dropout(dropout)])
 
     def call(self, images, keep_cnn_gradients=False):
-        print("images shape", images.shape)
+        # print("images shape", images.shape)
         if keep_cnn_gradients:
             raw_conv_feats = self.resnet(images)
         else:
             raw_conv_feats = tf.stop_gradient(self.resnet(images))
-        print("raw conv feats", raw_conv_feats.shape)
+        # print("raw conv feats", raw_conv_feats.shape)
         features = self.linear(raw_conv_feats)
-        print("features shape after convolution", features.shape)
+        # print("features shape after convolution", features.shape)
         features = tf.reshape(features, [tf.shape(features)[0], -1, tf.shape(features)[-1]])
-        print("returning this shape", features.shape)
+        # print("returning this shape", features.shape)
         return features
 
 
@@ -37,7 +36,7 @@ class EncoderLabels(tf.keras.layers.Layer):
     def __init__(self, embed_size, num_classes, dropout=0.5, embed_weights=None, scale_grad=False):
         super(EncoderLabels, self).__init__()
         # embeddinglayer = nn.Embedding(num_classes, embed_size, padding_idx=num_classes-1, scale_grad_by_freq=scale_grad)
-        # TODO: need to pad and somehow pass the last pytorch argument
+        # need to pad and somehow pass the last pytorch argument
         if embed_weights is not None:
             embeddinglayer = tf.keras.layers.Embedding(num_classes, embed_size, mask_zero=True, weights=embed_weights)
         else:

@@ -165,11 +165,13 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
 
         # attention
         if ingr_features is None:
+            img_features = tf.transpose(img_features, perm= [1, 2, 0])
 
             x, _ = self.cond_att(query=x,
                                     key=img_features,
                                     value=img_features,
-                                    key_padding_mask=None
+                                    key_padding_mask=None, 
+                                    training = training
                                     )
         elif img_features is None:
             x, _ = self.cond_att(query=x,
@@ -178,6 +180,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
                                     key_padding_mask=ingr_mask,
                                     incremental_state=incremental_state,
                                     static_kv=True,
+                                    training= training
                                     )
 
 
@@ -228,8 +231,8 @@ class DecoderTransformer(tf.keras.Model):
         super(DecoderTransformer, self).__init__()
         self.dropout = dropout
         self.seq_length = seq_length * num_instrs
-        self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5))
-        self.final_ln = tf.keras.layers.LayerNormalization()
+        self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5), name="decoder_transformer_embed_tokens")
+        self.final_ln = tf.keras.layers.LayerNormalization(name='final_layer_norm_decoder_transformer')
         if pos_embeddings:
             self.embed_positions = PositionalEmbedding(1024, embed_size, padding_idx=0, left_pad=False, learned=learned)
         else:
