@@ -64,17 +64,22 @@ class MultiheadAttention(tf.keras.layers.Layer):
         the key by passing a binary ByteTensor (`key_padding_mask`) with shape:
         batch x src_len, where padding elements are indicated by 1s.
         """
-
+        # tf.debugging.check_numerics(query, "query nan found")
         qkv_same = id(query) == id(key) == id(value)
         kv_same = id(key) == id(value)
         
         tgt_len, bsz, embed_dim = query.shape
         assert embed_dim == self.embed_dim
-
+        
         if qkv_same:
             q, k, v = self.in_proj_qkv(query)
+
         elif kv_same:
+            
             q = self.in_proj_q(query)
+ 
+            # print(k, "k")
+            # print(v, "v")
             if key is None:
                 assert value is None
                 k = v = tf.constant(0, dtype=q.dtype)
@@ -101,6 +106,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
         v = tf.reshape(v, [bsz * self.num_heads, -1, self.head_dim])
 
         attn_weights = tf.linalg.matmul(q, k, transpose_b=True)
+        # print(attn_weights, "mha attn weights output")
 
         if mask_future_timesteps and incremental_state is None:
             # assert tf.shape(query) == tf.shape(key), \
@@ -125,6 +131,9 @@ class MultiheadAttention(tf.keras.layers.Layer):
 
         attn_weights = tf.reshape(attn_weights, [bsz, self.num_heads, tf.shape(query)[0], -1])
         attn_weights = tf.reduce_mean(attn_weights, axis=1)
+
+        # print(attn, "mha attn output")
+        
 
         return attn, attn_weights
 
@@ -202,7 +211,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
 
     def fill_with_neg_inf(self, t):
         """FP16-compatible function that fills a tensor with -inf."""
-        output = tf.cast(tf.fill(tf.shape(t), tf.constant(float('-inf'))), dtype=t.dtype) 
+        output = tf.fill(tf.shape(t), tf.constant(float('-inf')))
         return output
 
     def buffered_mask(self, tensor):
@@ -210,7 +219,9 @@ class MultiheadAttention(tf.keras.layers.Layer):
         if self._mask is None:
             self._mask = tf.linalg.band_part(self.fill_with_neg_inf(tf.zeros_like(tensor)), 0, -1)
         if tf.shape(self._mask)[0] < dim:
-            self._mask = tf.linalg.band_part(self.fill_with_neg_inf(tf.resize(self._mask, (dim, dim))), 0, -1)
+            # self._mask = tf.linalg.band_part(self.fill_with_neg_inf(tf.reshape(self._mask, [dim, dim])), 0, -1)
+            new_mask = tf.zeros((dim, dim), dtype=tensor.dtype)
+            self._mask = tf.linalg.band_part(self.fill_with_neg_inf(new_mask), 0, -1) - tf.linalg.band_part(new_mask, 0, 0)
         return self._mask[:dim, :dim]
 
     # def reorder_incremental_state(self, incremental_state, new_order):

@@ -54,7 +54,7 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
     decoder = DecoderTransformer(args.embed_size, instrs_vocab_size,
                                  dropout=args.dropout_decoder_r, seq_length=args.maxseqlen,
                                  num_instrs=args.maxnuminstrs,
-                                 attention_nheads=args.n_att, num_layers=args.transf_layers,
+                                 attention_nheads=1, num_layers=1,
                                  normalize_before=True,
                                  normalize_inputs=False,
                                  last_ln=False,
@@ -62,9 +62,9 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
 
     ingr_decoder = DecoderTransformer(args.embed_size, ingr_vocab_size, dropout=args.dropout_decoder_i,
                                       seq_length=args.maxnumlabels,
-                                      num_instrs=1, attention_nheads=args.n_att_ingrs,
+                                      num_instrs=1, attention_nheads=1,
                                       pos_embeddings=False,
-                                      num_layers=args.transf_layers_ingrs,
+                                      num_layers=1,
                                       learned=False,
                                       normalize_before=True,
                                       normalize_inputs=True,
@@ -128,10 +128,10 @@ class InverseCookingModel(tf.keras.Model):
         self.label_smoothing = label_smoothing
 
     # Changed to a more familiar 'call' function, instead of 'forward'
-    def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False, training = False):
+    def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False, training = True):
+        print("Training flag in call:", training)
         if sample:
-            return self.sample(img_inputs, greedy=True)
-
+            return self.sample(img_inputs, greedy=True, training = training)
         targets = captions[:, 1:]
         targets = tf.reshape(targets, [-1])
 
@@ -163,7 +163,7 @@ class InverseCookingModel(tf.keras.Model):
             # autoregressive mode for ingredient decoder
             ingr_ids, ingr_logits = self.ingredient_decoder.sample(None, None, greedy=True,
                                                                    temperature=1.0, img_features=img_features,
-                                                                   first_token_value=0, replacement=False)
+                                                                   first_token_value=0, replacement=False, training = training)
 
             # NOTE: torch.nn.functional.softmax -> tf.nn.softmax
             ingr_logits = tf.nn.softmax(ingr_logits, axis=-1)
@@ -199,8 +199,6 @@ class InverseCookingModel(tf.keras.Model):
             # NOTE: Replaced torch.abs -> tf.math.abs
             losses['card_penalty'] = tf.math.abs(tf.reduce_sum(ingr_probs*target_one_hot, axis=1)) - tf.reduce_sum(target_one_hot, axis=1) + \
                                      tf.math.abs(tf.reduce_sum(ingr_probs*(1-target_one_hot), axis=1))
-            print(ingr_probs, "ingr_probs")
-            print(target_one_hot, "target OH")
 
             eos_loss = self.crit_eos(eos, tf.cast(target_eos, tf.float32))
 
@@ -250,7 +248,7 @@ class InverseCookingModel(tf.keras.Model):
 
         return losses
     
-    def sample(self, img_inputs, greedy=True, temperature=1.0, beam=-1, true_ingrs=None):
+    def sample(self, img_inputs, greedy=True, temperature=1.0, beam=-1, true_ingrs=None, training = False):
 
         outputs = dict()
 
@@ -260,7 +258,7 @@ class InverseCookingModel(tf.keras.Model):
             ingr_ids, ingr_probs = self.ingredient_decoder.sample(None, None, greedy=True, temperature=temperature,
                                                                   beam=-1,
                                                                   img_features=img_features, first_token_value=0,
-                                                                  replacement=False)
+                                                                  replacement=False, training=training)
 
             # mask ingredients after finding eos
             sample_mask = mask_from_eos(ingr_ids, eos_value=0, mult_before=False)

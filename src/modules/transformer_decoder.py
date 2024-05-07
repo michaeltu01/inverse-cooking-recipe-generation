@@ -131,7 +131,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
             dropout=dropout,
         )
 
-        self.cond_att = MultiheadAttention(
+        self.cond_attn = MultiheadAttention(
             self.embed_dim, n_att,
             dropout=dropout,
         )
@@ -145,36 +145,43 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
             self.last_ln = tf.keras.layers.LayerNormalization(epsilon=1e-5)
 
     def call(self, x, ingr_features, ingr_mask, incremental_state, img_features, training=False):
-
         # self attention
+        
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
+
         x, _ = self.self_attn(
             query=x,
             key=x,
             value=x,
-            mask_future_timesteps=True
+            mask_future_timesteps=True,
+            training = training
         )
+        
+
         dropout_layer = tf.keras.layers.Dropout(self.dropout)
         x = dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
 
         residual = x
+        
         x = self.maybe_layer_norm(1, x, before=True)
-
         # attention
         if ingr_features is None:
             img_features = tf.transpose(img_features, perm= [1, 2, 0])
+            # img features here is populated with numbers
 
-            x, _ = self.cond_att(query=x,
+            x, _ = self.cond_attn(query=x,
                                     key=img_features,
                                     value=img_features,
                                     key_padding_mask=None, 
                                     training = training
                                     )
+            # some rows here have been replaced with nan 
+
         elif img_features is None:
-            x, _ = self.cond_att(query=x,
+            x, _ = self.cond_attn(query=x,
                                     key=ingr_features,
                                     value=ingr_features,
                                     key_padding_mask=ingr_mask,
@@ -226,9 +233,10 @@ class DecoderTransformer(tf.keras.Model):
     """Transformer decoder."""
 
     def __init__(self, embed_size, vocab_size, dropout=0.5, seq_length=20, num_instrs=15,
-                 attention_nheads=16, pos_embeddings=True, num_layers=8, learned=True, normalize_before=True,
+                 attention_nheads=16, pos_embeddings=True, num_layers=16, learned=True, normalize_before=True,
                  normalize_inputs=False, last_ln=False, scale_embed_grad=False):
         super(DecoderTransformer, self).__init__()
+        print(num_layers, "num_layers")
         self.dropout = dropout
         self.seq_length = seq_length * num_instrs
         self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5), name="decoder_transformer_embed_tokens")
@@ -246,8 +254,6 @@ class DecoderTransformer(tf.keras.Model):
         self.linear = tf.keras.layers.Dense(vocab_size-1)
 
     def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None, training = False):
-        print(ingr_features, "ingr feat")
-        print(ingr_mask, "ingr mask")
         if ingr_features is not None:
             ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
             ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
@@ -283,25 +289,27 @@ class DecoderTransformer(tf.keras.Model):
         if self.normalize_inputs:
             x = self.layer_norms_in[2](x)
 
+
         x = tf.keras.layers.Dropout(self.dropout)(x, training=training)
 
         # B x T x C -> T x B x C
         # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
-        x = tf.transpose(x, perm=[1, 0, 2])
-        print(x, "x")
+        # x = tf.transpose(x, perm=[1, 0, 2])
         for p, layer in enumerate(self.td_layers):
+            print (layer)
             x  = layer(
                 x,
                 ingr_features=ingr_features,
                 ingr_mask=ingr_mask,
                 incremental_state=incremental_state,
-                img_features=img_features
+                img_features=img_features,
+                training = training
             )
-        
         
         # T x B x C -> B x T x C
         # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
-        x = tf.transpose(x, perm=[1, 0, 2])
+        #TODO:
+        # x = tf.transpose(x, perm=[1, 0, 2])
         x = self.linear(x)
         predicted = tf.argmax(x, axis=-1)
 
@@ -309,7 +317,7 @@ class DecoderTransformer(tf.keras.Model):
 
     def sample(self, ingr_features, ingr_mask, greedy=True, temperature=1.0, beam=-1,
                img_features=None, first_token_value=0,
-               replacement=True, last_token_value=0):
+               replacement=True, last_token_value=0, training = False):
 
         incremental_state = {}
 
@@ -319,7 +327,7 @@ class DecoderTransformer(tf.keras.Model):
         if beam != -1:
             if fs == 1:
                 return self.sample_beam(ingr_features, ingr_mask, beam, img_features, first_token_value,
-                                        replacement, last_token_value)
+                                        replacement, last_token_value, training = training)
             else:
                 print ("Beam Search can only be used with batch size of 1. Running greedy or temperature sampling...")
 
@@ -335,7 +343,7 @@ class DecoderTransformer(tf.keras.Model):
             caption_ids = [tf.cast(id, tf.int32) for id in sampled_ids]
             captions = tf.stack(caption_ids, axis=1)
 
-            outputs, _ = self.call(ingr_features=ingr_features, ingr_mask=ingr_mask, captions=captions, img_features=img_features, incremental_state=incremental_state)
+            outputs, _ = self.call(ingr_features=ingr_features, ingr_mask=ingr_mask, captions=captions, img_features=img_features, incremental_state=incremental_state, training=training)
             outputs = tf.squeeze(outputs, axis=1)
             if not replacement:
                 # predicted mask
@@ -384,7 +392,7 @@ class DecoderTransformer(tf.keras.Model):
         return sampled_ids, logits
 
     def sample_beam(self, ingr_features, ingr_mask, beam=3, img_features=None, first_token_value=0,
-                   replacement=True, last_token_value=0):
+                   replacement=True, last_token_value=0, training = False):
         k = beam
         alpha = 0.0
         # create dummy previous word
@@ -400,7 +408,7 @@ class DecoderTransformer(tf.keras.Model):
             all_candidates = []
             for rem in range(len(sequences)):
                 incremental = sequences[rem][2]
-                outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features, incremental)
+                outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features, incremental, training=training)
                 outputs = tf.squeeze(outputs, axis=1)
                 if not replacement:
                     # predicted mask

@@ -133,7 +133,7 @@ def main(args):
     print("inputs", tf.shape(dummy_inputs))
     print("captions", tf.shape(dummy_captions))
     print("ingrs", tf.shape(dummy_ingr_gt))
-    dummy_outputs = model(dummy_inputs, dummy_captions, dummy_ingr_gt, training=False)
+    dummy_outputs = model(dummy_inputs, dummy_captions, dummy_ingr_gt, training=True)
 
     # add model parameters
     if args.ingrs_only:
@@ -262,7 +262,6 @@ def main(args):
                     with tf.GradientTape() as tape:
                         tape.watch(model.trainable_variables)
                         losses = model(img_inputs, captions, ingr_gt, training=True)
-                        print(losses, "losses")
                     # gradients = tape.gradient(losses, model.trainable_variables)
                     # optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
