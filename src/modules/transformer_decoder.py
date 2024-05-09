@@ -2,6 +2,7 @@ import math
 # import modules.utils as utils
 from modules.multihead_attention import MultiheadAttention
 import tensorflow as tf
+import keras
 # import tensorflow_addons as tfa
 import numpy as np
 import copy
@@ -125,95 +126,97 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         self.relu_dropout = dropout
         self.normalize_before = normalize_before
 
+        head_dim = self.embed_dim // n_att
+        assert head_dim * n_att == self.embed_dim, "embed_dim must be divisible by num_heads"
         # self-attention on generated recipe
-        self.self_attn = MultiheadAttention(
-            self.embed_dim, n_att,
-            dropout=dropout,
+        self.self_attn = keras.layers.MultiHeadAttention(
+            num_heads=n_att,
+            key_dim=head_dim,
+            value_dim=head_dim,
+            dropout=dropout
         )
 
-        self.cond_attn = MultiheadAttention(
-            self.embed_dim, n_att,
-            dropout=dropout,
+        # conditional-attention on img_features
+        self.cond_attn = keras.layers.MultiHeadAttention(
+            num_heads=n_att,
+            key_dim=head_dim,
+            value_dim=head_dim,
+            dropout=dropout
         )
 
-        self.fc1 = tf.keras.layers.Dense(self.embed_dim, activation='relu')
-        self.fc2 = tf.keras.layers.Dense(self.embed_dim)
-        self.layer_norms = [tf.keras.layers.LayerNormalization(epsilon=1e-5) for i in range(3)]
+        self.fc1 = keras.layers.Dense(self.embed_dim, activation=None)
+        self.fc2 = keras.layers.Dense(self.embed_dim, activation=None)
+        self.layer_norms = [keras.layers.LayerNormalization(epsilon=1e-5) for i in range(3)]
+        self.dropout_layer = keras.layers.Dropout(rate=self.dropout)
 
         self.use_last_ln = last_ln
         if self.use_last_ln:
-            self.last_ln = tf.keras.layers.LayerNormalization(epsilon=1e-5)
+            self.last_ln = keras.layers.LayerNormalization(epsilon=1e-5)
 
     def call(self, x, ingr_features, ingr_mask, incremental_state, img_features, training=False):
         # self attention
-        
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
-
-        x, _ = self.self_attn(
+        print("x shape", x.shape)
+        x = self.self_attn(
             query=x,
             key=x,
             value=x,
-            mask_future_timesteps=True,
-            training = training
+            training=training
         )
-        
 
-        dropout_layer = tf.keras.layers.Dropout(self.dropout)
-        x = dropout_layer(x, training=training)
+        x = self.dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
 
+        # conditional attention
         residual = x
-        
         x = self.maybe_layer_norm(1, x, before=True)
-        # attention
         if ingr_features is None:
             img_features = tf.transpose(img_features, perm= [1, 2, 0])
+            # NOTE: img_features shape should be (batch_size, img_features, embed_size)
+            print("img inputs shape", img_features.shape)
             # img features here is populated with numbers
-
-            x, _ = self.cond_attn(query=x,
-                                    key=img_features,
-                                    value=img_features,
-                                    key_padding_mask=None, 
-                                    training = training
-                                    )
+            x = self.cond_attn(query=x,
+                    key=img_features,
+                    value=img_features,
+                    training=training
+                )
             # some rows here have been replaced with nan 
 
         elif img_features is None:
-            x, _ = self.cond_attn(query=x,
-                                    key=ingr_features,
-                                    value=ingr_features,
-                                    key_padding_mask=ingr_mask,
-                                    incremental_state=incremental_state,
-                                    static_kv=True,
-                                    training= training
-                                    )
-
-
+            # NOTE: ingr_features shape should be (batch_size, seq_len, embed_size)
+            print("img inputs shape", img_features.shape)
+            x = self.cond_attn(query=x,
+                    key=ingr_features,
+                    value=ingr_features,
+                    training= training
+                )
+            
         else:
             # attention on concatenation of encoder_out and encoder_aux, query self attn (x)
-            img_features = tf.transpose(img_features, perm=[2,1,0])
-            kv = tf.concat((img_features, ingr_features), axis=0)
-            mask = tf.concat([tf.zeros((img_features.shape[1], img_features.shape[0]), dtype=tf.int32), tf.cast(ingr_mask, tf.int32)], axis=1)
-            # attn_output = self.cond_att(x, kv, kv, attention_mask=mask)
-            x, _ = self.cond_att(query=x,
-                                    key=kv,
-                                    value=kv,
-                                    key_padding_mask=mask,
-                                    incremental_state=incremental_state,
-                                    static_kv=True,
-            )
-        x = dropout_layer(x, training=training)
+            img_features = tf.transpose(img_features, perm=[1, 2, 0])
+            # NOTE: img_features shape should be (batch_size, img_features, embed_size)
+            print("img inputs shape", img_features.shape)
+            kv = tf.concat((img_features, ingr_features), axis=1)
+            # mask = tf.concat([tf.zeros((img_features.shape[1], img_features.shape[0]), dtype=tf.int32), tf.cast(ingr_mask, tf.int32)], axis=1)
+            x = self.cond_attn(query=x,
+                    key=kv,
+                    value=kv,
+                    training=training
+                )
+
+        x = self.dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(1, x, after=True)
 
+        # Fully connected layers
         residual = x
         x = self.maybe_layer_norm(-1, x, before=True)
         x = self.fc1(x)
-        x = dropout_layer(x, training=training)
+        x = self.dropout_layer(x, training=training)
         x = self.fc2(x)
-        x = dropout_layer(x, training=training)
+        x = self.dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(-1, x, after=True)
 
