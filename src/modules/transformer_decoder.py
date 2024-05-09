@@ -21,7 +21,7 @@ def make_positions(tensor, padding_idx, left_pad):
     range_buf = tf.range(padding_idx + 1, max_pos, dtype=tensor.dtype)
     #make_positions.range_buf = make_positions.range_buf.type_as(tensor)
     mask = tf.not_equal(tensor, padding_idx)
-    positions = range_buf[:tensor.size(1)].expand_as(tensor)
+    positions = tf.broadcast_to(range_buf[:tensor.shape[1]], tensor.shape)
     if left_pad:
         positions = positions - mask.size(1) + tf.reduce_sum(tf.cast(mask, tf.int32), axis=1, keepdims=True)
 
@@ -41,7 +41,7 @@ class LearnedPositionalEmbedding(tf.keras.layers.Layer):
         self.embedding_dim = embedding_dim
         self.padding_idx = padding_idx
         self.left_pad = left_pad
-        self.embeddings = self.add_weight("embeddings", shape=[num_embeddings, embedding_dim], initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embedding_dim**-0.5))
+        self.embeddings = self.add_weight(name="embeddings", shape=(num_embeddings, embedding_dim), initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embedding_dim**-0.5))
 
     def call(self, input, incremental_state=None):
         """Input is expected to be of size [bsz x seqlen]."""
@@ -131,7 +131,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
             dropout=dropout,
         )
 
-        self.cond_att = MultiheadAttention(
+        self.cond_attn = MultiheadAttention(
             self.embed_dim, n_att,
             dropout=dropout,
         )
@@ -144,52 +144,59 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         if self.use_last_ln:
             self.last_ln = tf.keras.layers.LayerNormalization(epsilon=1e-5)
 
-    def call(self, x, ingr_features, ingr_mask, incremental_state, img_features):
-
+    def call(self, x, ingr_features, ingr_mask, incremental_state, img_features, training=False):
         # self attention
+        
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
+
         x, _ = self.self_attn(
             query=x,
             key=x,
             value=x,
             mask_future_timesteps=True,
-            incremental_state=incremental_state,
-            need_weights=False,
+            training = training
         )
+        
+
         dropout_layer = tf.keras.layers.Dropout(self.dropout)
-        x = dropout_layer(x, training=self.training)
+        x = dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
 
         residual = x
+        
         x = self.maybe_layer_norm(1, x, before=True)
-
         # attention
         if ingr_features is None:
+            img_features = tf.transpose(img_features, perm= [1, 2, 0])
+            # img features here is populated with numbers
 
-            x, _ = self.cond_att(query=x,
+            x, _ = self.cond_attn(query=x,
                                     key=img_features,
                                     value=img_features,
-                                    key_padding_mask=None,
-                                    incremental_state=incremental_state,
-                                    static_kv=True,
+                                    key_padding_mask=None, 
+                                    training = training
                                     )
+            # some rows here have been replaced with nan 
+
         elif img_features is None:
-            x, _ = self.cond_att(query=x,
+            x, _ = self.cond_attn(query=x,
                                     key=ingr_features,
                                     value=ingr_features,
                                     key_padding_mask=ingr_mask,
                                     incremental_state=incremental_state,
                                     static_kv=True,
+                                    training= training
                                     )
 
 
         else:
             # attention on concatenation of encoder_out and encoder_aux, query self attn (x)
+            img_features = tf.transpose(img_features, perm=[2,1,0])
             kv = tf.concat((img_features, ingr_features), axis=0)
-            mask = tf.concat([tf.zeros((img_features.shape[1], img_features.shape[0]), dtype=tf.int32), ingr_mask], axis=1)
-            attn_output = self.cond_att(x, kv, kv, attention_mask=mask)
+            mask = tf.concat([tf.zeros((img_features.shape[1], img_features.shape[0]), dtype=tf.int32), tf.cast(ingr_mask, tf.int32)], axis=1)
+            # attn_output = self.cond_att(x, kv, kv, attention_mask=mask)
             x, _ = self.cond_att(query=x,
                                     key=kv,
                                     value=kv,
@@ -197,16 +204,16 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
                                     incremental_state=incremental_state,
                                     static_kv=True,
             )
-        x = dropout_layer(x, p=self.dropout, training=self.training)
+        x = dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(1, x, after=True)
 
         residual = x
         x = self.maybe_layer_norm(-1, x, before=True)
         x = self.fc1(x)
-        x = dropout_layer(x, training=self.training)
+        x = dropout_layer(x, training=training)
         x = self.fc2(x)
-        x = dropout_layer(x, training=self.training)
+        x = dropout_layer(x, training=training)
         x = residual + x
         x = self.maybe_layer_norm(-1, x, after=True)
 
@@ -226,24 +233,27 @@ class DecoderTransformer(tf.keras.Model):
     """Transformer decoder."""
 
     def __init__(self, embed_size, vocab_size, dropout=0.5, seq_length=20, num_instrs=15,
-                 attention_nheads=16, pos_embeddings=True, num_layers=8, learned=True, normalize_before=True,
+                 attention_nheads=16, pos_embeddings=True, num_layers=16, learned=True, normalize_before=True,
                  normalize_inputs=False, last_ln=False, scale_embed_grad=False):
         super(DecoderTransformer, self).__init__()
-        self.dropout = tf.keras.layers.Dropout(dropout)
+        print(num_layers, "num_layers")
+        self.dropout = dropout
         self.seq_length = seq_length * num_instrs
-        self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5))
-        self.final_ln = tf.keras.layers.LayerNormalization()
+        self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5), name="decoder_transformer_embed_tokens")
+        self.final_ln = tf.keras.layers.LayerNormalization(name='final_layer_norm_decoder_transformer')
         if pos_embeddings:
-            self.embed_positions = PositionalEmbedding(1024, embed_size, 0, left_pad=False, learned=learned)
+            self.embed_positions = PositionalEmbedding(1024, embed_size, padding_idx=0, left_pad=False, learned=learned)
         else:
             self.embed_positions = None
         self.normalize_inputs = normalize_inputs
+        if self.normalize_inputs:
+            self.layer_norms_in = [tf.keras.layers.LayerNormalization(epsilon=1e-5) for i in range(3)]
+
         self.embed_scale = math.sqrt(embed_size)
         self.td_layers = [TransformerDecoderLayer(embed_size, attention_nheads, dropout, normalize_before, last_ln) for _ in range(num_layers)]
-        self.linear = tf.keras.layers.Dense(vocab_size)
+        self.linear = tf.keras.layers.Dense(vocab_size-1)
 
-    def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None):
-
+    def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None, training = False):
         if ingr_features is not None:
             ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
             ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
@@ -251,8 +261,8 @@ class DecoderTransformer(tf.keras.Model):
                 self.layer_norms_in[0](ingr_features)
 
         if img_features is not None:
-            ingr_features = tf.transpose(ingr_features, perm=[0, 2, 1])
-            ingr_features = tf.transpose(ingr_features, perm=[1, 0, 2])
+            img_features = tf.transpose(img_features, perm=[0, 2, 1])
+            img_features = tf.transpose(img_features, perm=[1, 0, 2])
             if self.normalize_inputs:
                 self.layer_norms_in[1](img_features)
 
@@ -272,37 +282,42 @@ class DecoderTransformer(tf.keras.Model):
         # embed tokens and positions
         x = self.embed_scale * self.embed_tokens(captions)
 
+
         if self.embed_positions is not None:
             x += positions
 
         if self.normalize_inputs:
             x = self.layer_norms_in[2](x)
 
-        x = tf.keras.layers.Dropout(self.dropout)(x, training=self.training)
+
+        x = tf.keras.layers.Dropout(self.dropout)(x, training=training)
 
         # B x T x C -> T x B x C
-        x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
-
+        # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
+        # x = tf.transpose(x, perm=[1, 0, 2])
         for p, layer in enumerate(self.td_layers):
+            print (layer)
             x  = layer(
                 x,
-                ingr_features,
-                ingr_mask,
-                incremental_state,
-                img_features
+                ingr_features=ingr_features,
+                ingr_mask=ingr_mask,
+                incremental_state=incremental_state,
+                img_features=img_features,
+                training = training
             )
-            
+        
         # T x B x C -> B x T x C
-        x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
-
+        # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
+        #TODO:
+        # x = tf.transpose(x, perm=[1, 0, 2])
         x = self.linear(x)
-        _, predicted = tf.argmax(axis=-1)
+        predicted = tf.argmax(x, axis=-1)
 
         return x, predicted
 
     def sample(self, ingr_features, ingr_mask, greedy=True, temperature=1.0, beam=-1,
                img_features=None, first_token_value=0,
-               replacement=True, last_token_value=0):
+               replacement=True, last_token_value=0, training = False):
 
         incremental_state = {}
 
@@ -312,20 +327,23 @@ class DecoderTransformer(tf.keras.Model):
         if beam != -1:
             if fs == 1:
                 return self.sample_beam(ingr_features, ingr_mask, beam, img_features, first_token_value,
-                                        replacement, last_token_value)
+                                        replacement, last_token_value, training = training)
             else:
                 print ("Beam Search can only be used with batch size of 1. Running greedy or temperature sampling...")
 
         first_word = np.ones(fs)*first_token_value
 
         first_word = tf.fill([fs], first_token_value)
-        first_word = tf.cast(first_word, tf.int32)
+        first_word = tf.cast(first_word, tf.int64)
         sampled_ids = [first_word]
         logits = []
 
         for i in range(self.seq_length):
             # forward
-            outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sampled_ids, axis=1), img_features)
+            caption_ids = [tf.cast(id, tf.int32) for id in sampled_ids]
+            captions = tf.stack(caption_ids, axis=1)
+
+            outputs, _ = self.call(ingr_features=ingr_features, ingr_mask=ingr_mask, captions=captions, img_features=img_features, incremental_state=incremental_state, training=training)
             outputs = tf.squeeze(outputs, axis=1)
             if not replacement:
                 # predicted mask
@@ -334,8 +352,14 @@ class DecoderTransformer(tf.keras.Model):
                 else:
                     # ensure no repetitions in sampling if replacement==False
                     batch_ind = [j for j in range(fs) if sampled_ids[i][j] != 0]
-                    sampled_ids_new = sampled_ids[i][batch_ind]
-                    predicted_mask[batch_ind, sampled_ids_new] = float('-inf')
+                    if len(batch_ind) != 0:
+                        sampled_ids_new = tf.gather(sampled_ids[i], batch_ind)
+                        predicted_mask = np.zeros_like(outputs)
+                        for b_ind, sample_id in zip(batch_ind, sampled_ids_new):
+                            predicted_mask[b_ind, sample_id] = -np.inf
+                        predicted_mask = tf.convert_to_tensor(predicted_mask)
+                    else:
+                        predicted_mask = tf.zeros_like(outputs)
 
                 # mask previously selected ids
                 outputs += predicted_mask
@@ -346,15 +370,21 @@ class DecoderTransformer(tf.keras.Model):
                 predicted = tf.argmax(outputs_prob, axis=1)
             else:
                 k = 10
-                outputs_prob = outputs / temperature
+                # outputs_prob = outputs / temperature
+                outputs_prob = tf.squeeze(outputs, axis=1) / temperature
                 outputs_prob = tf.nn.softmax(outputs_prob, axis=-1)
 
                 # top k random sampling
                 prob_prev_topk, indices = tf.nn.top_k(outputs_prob, k=k)
-                predicted = tf.random.categorical(tf.math.log(prob_prev_topk), 1)
-                predicted = tf.gather_nd(indices, predicted, batch_dims=1)
+                # predicted = tf.random.categorical(tf.math.log(prob_prev_topk), 1)
+                predicted = tf.reshape(tf.random.categorical(tf.math.log(prob_prev_topk), 1), -1)
+                # predicted = tf.gather_nd(indices, predicted, batch_dims=1)
+                predicted = tf.gather_nd(indices, predicted, batch_dims=1)[:, 0]
 
             sampled_ids.append(predicted)
+            # print(sampled_ids.shape)
+            # print(predicted.shape)
+            # tf.concat([sampled_ids, predicted], axis=0)
 
         sampled_ids = tf.stack(sampled_ids[1:], axis=1)
         logits = tf.stack(logits, axis=1)
@@ -362,13 +392,13 @@ class DecoderTransformer(tf.keras.Model):
         return sampled_ids, logits
 
     def sample_beam(self, ingr_features, ingr_mask, beam=3, img_features=None, first_token_value=0,
-                   replacement=True, last_token_value=0):
+                   replacement=True, last_token_value=0, training = False):
         k = beam
         alpha = 0.0
         # create dummy previous word
         fs = tf.shape(ingr_features)[0] if ingr_features is not None else tf.shape(img_features)[0]
         first_word = tf.fill([fs], first_token_value)
-        first_word = tf.cast(first_word, tf.int32)
+        first_word = tf.cast(first_word, tf.int64)
 
         sequences = [[[first_word], 0, {}, False, 1]]
         finished = []
@@ -378,7 +408,7 @@ class DecoderTransformer(tf.keras.Model):
             all_candidates = []
             for rem in range(len(sequences)):
                 incremental = sequences[rem][2]
-                outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features)
+                outputs, _ = self.call(ingr_features, ingr_mask, tf.stack(sequences[rem][0], axis=1), img_features, incremental, training=training)
                 outputs = tf.squeeze(outputs, axis=1)
                 if not replacement:
                     # predicted mask
@@ -399,11 +429,11 @@ class DecoderTransformer(tf.keras.Model):
                 # score is [ batch x beam ] and every element is a scalar
                 # incremental is [batch x beam ] and every element is a dict
 
-
                 for bid in range(beam):
                     tokens = sequences[rem][0] + [indices[:, bid]]
-                    score = sequences[rem][1] + probs[:, bid]
-                    if indices[:,bid] == last_token_value:
+                    # score = sequences[rem][1] + probs[:, bid]
+                    score = sequences[rem][1] + tf.get_static_value(tf.squeeze(probs[:, bid]))
+                    if tf.get_static_value(indices[:,bid]) == last_token_value:
                         finished.append([tokens, score, None, True, sequences[rem][-1] + 1])
                     else:
                         all_candidates.append([tokens, score, incremental, False, sequences[rem][-1] + 1])

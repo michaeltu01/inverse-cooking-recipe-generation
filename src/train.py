@@ -12,6 +12,7 @@ import sys
 import json
 import time
 from utils.tb_visualizer import Visualizer
+# import tensorflow_addons as tfa
 from model import mask_from_eos, label2onehot
 from utils.metrics import softIoU, compute_metrics, update_error_types
 import random
@@ -58,27 +59,6 @@ def make_dir(d):
     if not os.path.exists(d):
         os.makedirs(d)
 
-def load_and_preprocess_image(image_path, is_train, image_size, crop_size):
-    image = tf.io.read_file(image_path)
-    image = tf.image.decode_jpeg(image, channels=3)
-    image = tf.image.resize(image, [image_size, image_size])
-
-    if is_train:
-        image = tf.image.random_flip_left_right(image)
-        image = tf.image.random_crop(image, size=[crop_size, crop_size, 3])
-        image = tf.image.rot90(image, k=tf.random.uniform(shape=[], minval=0, maxval=4, dtype=tf.int32))
-        image = tf.image.pad_to_bounding_box(image, 10, 10, crop_size + 20, crop_size + 20)
-        image = tf.image.crop_to_bounding_box(image, 10, 10, crop_size, crop_size)
-    else:
-        image = tf.image.resize_with_crop_or_pad(image, crop_size, crop_size)
-
-    # Normalize image
-    image = tf.cast(image, tf.float32) / 255.0
-    image -= tf.constant([0.485, 0.456, 0.406])
-    image /= tf.constant([0.229, 0.224, 0.225])
-    
-    return image
-
 def main(args):
 
     # Create model directory & other aux folders for logging
@@ -95,6 +75,7 @@ def main(args):
         logger = Visualizer(tb_logs, name='visual_results')
 
     # check if we want to resume from last checkpoint of current model
+    # NOTE: Lowkey unnecessary
     if args.resume:
         args = pickle.load(open(os.path.join(checkpoints_dir, 'args.pkl'), 'rb'))
         args.resume = True
@@ -116,13 +97,26 @@ def main(args):
     datasets = {}
 
     data_dir = args.epicurious_dir
+    
+    for split in ['train', 'val']: 
 
-    for split in ['train', 'val']:
+        if split == 'train':
+            transform = tf.keras.Sequential([tf.keras.layers.Resizing(args.image_size, args.image_size),
+                                     tf.keras.layers.RandomFlip("horizontal"),
+                                     tf.keras.layers.RandomCrop(args.crop_size, args.crop_size),
+                                     tf.keras.layers.Rescaling(1./255),
+                                     tf.keras.layers.Normalization(mean=[0.485, 0.456, 0.406], variance=[0.229**2, 0.224**2, 0.225**2])])
+        elif split == 'val':
+            transform = tf.keras.Sequential([tf.keras.layers.Resizing(args.image_size, args.image_size),
+                                        tf.keras.layers.CenterCrop(args.crop_size, args.crop_size),
+                                        tf.keras.layers.Normalization(mean=[0.485, 0.456, 0.406], variance=[0.229**2, 0.224**2, 0.225**2])])
+        # composed_transform = tfa.image.compose_transforms(transform_list)
+
         max_num_samples = max(args.max_eval, args.batch_size) if split == 'val' else -1
         data_loaders[split], datasets[split] = get_loader(data_dir, args.aux_data_dir, split,
                                                         args.maxseqlen, args.maxnuminstrs,
                                                         args.maxnumlabels, args.maxnumims,
-                                                        None, args.batch_size, shuffle=(split == 'train'),
+                                                        transform, args.batch_size, shuffle=(split == 'train'),
                                                         num_workers=args.num_workers,
                                                         drop_last=True, max_num_samples=max_num_samples,
                                                         use_lmdb=args.use_lmdb, suff=args.suff)
@@ -130,17 +124,17 @@ def main(args):
     ingr_vocab_size = datasets[split].get_ingrs_vocab_size()
     instrs_vocab_size = datasets[split].get_instrs_vocab_size()
 
-    # x = datasets['train'].__getitem__(1)
-    x = datasets['train'][0][5]
-    tf.print(x)
-
     # Build the model
     model = get_model(args, ingr_vocab_size, instrs_vocab_size)
-
-    model = model.build()
+    keep_cnn_gradients = False #NEW
     decay_factor = 1.0
-
     
+    dummy_inputs, dummy_captions, dummy_ingr_gt, _, _ = next(iter(data_loaders['train']))
+    print("inputs", tf.shape(dummy_inputs))
+    print("captions", tf.shape(dummy_captions))
+    print("ingrs", tf.shape(dummy_ingr_gt))
+    dummy_outputs = model(dummy_inputs, dummy_captions, dummy_ingr_gt, training=True)
+
     # add model parameters
     if args.ingrs_only:
         params = model.ingredient_decoder.trainable_variables
@@ -149,8 +143,8 @@ def main(args):
     else:
         params = model.recipe_decoder.trainable_variables + model.ingredient_decoder.trainable_variables \
                 + model.ingredient_encoder.trainable_variables
-
     # only train the linear layer in the encoder if we are not transfering from another model
+    # NOTE: Lowkey unnecessary
     if args.transfer_from == '':
         params += model.image_encoder.linear.trainable_variables
     params_cnn = model.image_encoder.resnet.trainable_variables
@@ -159,14 +153,18 @@ def main(args):
     print("CNN params:", sum(tf.size(p).numpy() for p in model.image_encoder.trainable_variables))
     print("Decoder params:", sum(tf.size(p).numpy() for p in params))
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay)
+    # optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay)
 
+    # NOTE: Removed fine-tuning procedure
+
+    # NOTE: Lowkey unnecessary
     if args.resume:
         model_path = os.path.join(args.save_dir, args.project_name, args.model_name, 'checkpoints', 'modelbest.ckpt')
         optim_path = os.path.join(args.save_dir, args.project_name, args.model_name, 'checkpoints', 'optimbest.ckpt')
         model.load_weights(model_path)
-        optimizer.load_weights(optim_path)
+        model.optimizer.load_weights(optim_path)
 
+    # NOTE: Lowkey unnecessary
     if args.transfer_from != '':
         model_path = os.path.join(args.save_dir, args.project_name, args.transfer_from, 'checkpoints', 'modelbest.ckpt')
         pretrained_model = get_model(args, ingr_vocab_size, instrs_vocab_size)
@@ -185,10 +183,7 @@ def main(args):
     es_best = 10000 if args.es_metric == 'loss' else 0
     # Train the model
     start = args.current_epoch
-
-
     for epoch in range(start, args.num_epochs):
-
         # save current epoch for resuming
         if args.tensorboard:
             logger.reset()
@@ -200,8 +195,9 @@ def main(args):
             decay_factor = args.lr_decay_rate ** frac
             new_lr = args.learning_rate*decay_factor
             print ('Epoch %d. lr: %.5f'%(epoch, new_lr))
-            optimizer.learning_rate.assign(new_lr)
+            model.optimizer.learning_rate.assign(new_lr)
 
+        # NOTE: Please don't runnn
         if args.finetune_after != -1 and args.finetune_after < epoch \
                 and not keep_cnn_gradients and params_cnn is not None:
 
@@ -211,80 +207,78 @@ def main(args):
             #                               {'params': params_cnn,
             #                                'lr': decay_factor*args.learning_rate*args.scale_learning_rate_cnn}],
             #                              lr=decay_factor*args.learning_rate)
-            optimizer.learning_rate.assign(decay_factor * args.learning_rate)
+            model.optimizer.learning_rate.assign(decay_factor * args.learning_rate)
             keep_cnn_gradients = True
 
         for split in ['train', 'val']:
-
-            if split == 'train':
-                model.train()
-            else:
-                model.eval()
             total_step = len(data_loaders[split])
             loader = iter(data_loaders[split])
 
             total_loss_dict = {'recipe_loss': [], 'ingr_loss': [],
-                               'eos_loss': [], 'loss': [],
-                               'iou': [], 'perplexity': [], 'iou_sample': [],
-                               'f1': [],
-                               'card_penalty': []}
-
+                                'eos_loss': [], 'loss': [],
+                                'iou': [], 'perplexity': [], 'iou_sample': [],
+                                'f1': [],
+                                'card_penalty': []}
             error_types = {'tp_i': 0, 'fp_i': 0, 'fn_i': 0, 'tn_i': 0,
-                           'tp_all': 0, 'fp_all': 0, 'fn_all': 0}
+                        'tp_all': 0, 'fp_all': 0, 'fn_all': 0}
 
             start = time.time()
-
             for i in range(total_step):
 
-                img_inputs, captions, ingr_gt, img_ids, paths = loader.next()
+                img_inputs, captions, ingr_gt, img_ids, paths = next(loader)
 
                 img_inputs = tf.convert_to_tensor(img_inputs.numpy())
                 captions = tf.convert_to_tensor(captions.numpy())
                 ingr_gt = tf.convert_to_tensor(ingr_gt.numpy())
                 true_caps_batch = captions[:, 1:]
-
                 loss_dict = {}
 
+                # if split == 'train':
+                #     model(img_inputs, captions, ingr_gt, sample=False, training = True)
+                # else:
+                #     model.eval()
+                # total_step = len(data_loaders[split])
+                # loader = iter(data_loaders[split])
                 if split == 'val':
-                    predictions, outputs = model(img_inputs, captions, ingr_gt, training=False)
+                    losses = model(img_inputs, captions, ingr_gt, training=False)
 
                     if not args.recipe_only:
+                        outputs = model(img_inputs, captions, ingr_gt, sample=True)
                         ingr_ids_greedy = outputs['ingr_ids']
 
                         mask = mask_from_eos(ingr_ids_greedy, eos_value=0, mult_before=False)
                         ingr_ids_greedy = tf.where(mask == 0, ingr_vocab_size - 1, ingr_ids_greedy)
                         pred_one_hot = label2onehot(ingr_ids_greedy, ingr_vocab_size - 1)
                         target_one_hot = label2onehot(ingr_gt, ingr_vocab_size - 1)
-
                         iou_sample = softIoU(pred_one_hot, target_one_hot)
-                        iou_sample = tf.reduce_sum(iou_sample) / (tf.size(iou_sample) + 1e-6) 
+                        # iou_sample = tf.reduce_sum(iou_sample) / (tf.shape(iou_sample)[0] + 1e-6) 
+                        iou_sample = tf.reduce_sum(iou_sample) / (tf.math.count_nonzero(iou_sample) + 1e-6)
                         loss_dict['iou_sample'] = iou_sample.numpy()
 
                         update_error_types(error_types, pred_one_hot, target_one_hot)
 
                         del outputs, pred_one_hot, target_one_hot, iou_sample
-
                 else:
                     with tf.GradientTape() as tape:
-                        loss = model(img_inputs, captions, ingr_gt, training=True)
-                    gradients = tape.gradient(loss, model.trainable_variables)
-                    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+                        tape.watch(model.trainable_variables)
+                        losses = model(img_inputs, captions, ingr_gt, training=True)
+                    # gradients = tape.gradient(losses, model.trainable_variables)
+                    # optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
                 if not args.ingrs_only:
-                    recipe_loss = loss['recipe_loss']
+                    recipe_loss = losses['recipe_loss']
 
                     recipe_loss = tf.reshape(recipe_loss, tf.shape(true_caps_batch))
                     non_pad_mask = tf.cast(tf.not_equal(true_caps_batch, instrs_vocab_size - 1), tf.float32)
 
                     recipe_loss_masked = tf.reduce_sum(recipe_loss * non_pad_mask, axis=-1) / tf.reduce_sum(non_pad_mask, axis=-1)
-
                     perplexity = tf.exp(recipe_loss_masked)
 
                     recipe_loss = tf.reduce_mean(recipe_loss_masked)
                     perplexity = tf.reduce_mean(perplexity)
 
-                    loss_dict['recipe_loss'] = recipe_loss
-                    loss_dict['perplexity'] = perplexity
+                    loss_dict['recipe_loss'] = recipe_loss.numpy()
+                    loss_dict['perplexity'] = perplexity.numpy()
                 else:
                     recipe_loss = 0
 
@@ -318,13 +312,15 @@ def main(args):
                 for key in loss_dict.keys():
                     if key not in total_loss_dict:
                         total_loss_dict[key] = []
-                    total_loss_dict[key].append(loss_dict[key].numpy())
+                    total_loss_dict[key].append(loss_dict[key])
 
                 if split == 'train':
-                    with tf.GradientTape() as tape:
-                        total_loss = sum(loss_dict.values())
-                    gradients = tape.gradient(total_loss, model.trainable_variables)
-                    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+                    # with tf.GradientTape() as tape:
+                    #     total_loss = tf.convert_to_tensor(sum(loss_dict.values()))
+                    gradients = tape.gradient(total_loss, params)
+                    for grad, var in zip(gradients, model.trainable_variables):
+                        print(f"{var.name}, grad mean: {tf.reduce_mean(grad) if grad is not None else 'No gradient'}")
+                    model.optimizer.apply_gradients(zip(gradients, params))
 
                 if args.log_step != -1 and i % args.log_step == 0:
                     elapsed_time = time.time() - start
@@ -339,12 +335,13 @@ def main(args):
                     print(strtoprint)
 
                     if args.tensorboard:
-                        with logger.as_default():
-                            for k, v in total_loss_dict.items():
-                                if len(v) > 0:
-                                    tf.summary.scalar(k, np.mean(v[-args.log_step:]), step=total_step * epoch + i)
-                            tf.summary.flush()
-
+                        # with logger.as_default():
+                        #     for k, v in total_loss_dict.items():
+                        #         if len(v) > 0:
+                        #             tf.summary.scalar(k, np.mean(v[-args.log_step:]), step=total_step * epoch + i)
+                        #     tf.summary.flush()
+                        logger.scalar_summary(mode=split+'_iter', epoch=total_step*epoch+i,
+                                              **{k: np.mean(v[-args.log_step:]) for k, v in total_loss_dict.items() if v})
                     start = time.time()
                 del loss, losses, captions, img_inputs
 
@@ -365,10 +362,10 @@ def main(args):
         es_value = np.mean(total_loss_dict[args.es_metric])
 
         # save current model as well
-        save_model(model, optimizer, checkpoints_dir, suff='')
+        save_model(model, model.optimizer, checkpoints_dir, suff='')
         if (args.es_metric == 'loss' and es_value < es_best) or (args.es_metric == 'iou_sample' and es_value > es_best):
             es_best = es_value
-            save_model(model, optimizer, checkpoints_dir, suff='best')
+            save_model(model, model.optimizer, checkpoints_dir, suff='best')
             pickle.dump(args, open(os.path.join(checkpoints_dir, 'args.pkl'), 'wb'))
             curr_pat = 0
             print('Saved checkpoint.')

@@ -459,10 +459,10 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--epicurious_path', type=str,
-                        default='./archive/epicurious_data.csv',
+                        default='../archive/epicurious_data.csv',
                         help='epicurious path')
 
-    parser.add_argument('--save_path', type=str, default='./data/',
+    parser.add_argument('--save_path', type=str, default='../data/',
                         help='path for saving vocabulary wrapper')
 
     parser.add_argument('--suff', type=str, default='')

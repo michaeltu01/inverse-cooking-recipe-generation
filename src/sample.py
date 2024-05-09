@@ -29,19 +29,17 @@ def compute_score(sampled_ids):
 
 def label2onehot(labels, pad_value):
     # input labels to one hot vector
-    inp_ = tf.expand_dims(labels, 2)
-    # one_hot = torch.FloatTensor(labels.size(0), labels.size(1), pad_value + 1).zero_().to(device)
-    one_hot = tf.zeros(shape=[labels.size(0), labels.size(1), pad_value + 1], dtype=tf.dtypes.float32)
-    # one_hot.scatter_(2, inp_, 1)
-    # https://stackoverflow.com/questions/70276246/match-pytorch-scatter-output-in-tensorflow
-    one_hot = tf.tensor_scatter_nd_update(one_hot, inp_, 1)
-    one_hot, _ = tf.reduce_max(one_hot, axis=1)
-    # remove pad and eos position
-    one_hot = one_hot[:, 1:-1]
-    one_hot[:, 0] = 0
-
+    inp_ = tf.expand_dims(labels, axis=-1)
+    one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=2)
+    one_hot = tf.reduce_max(one_hot, axis=1)
+    # remove pad position
+    one_hot = one_hot[:, :-1]
+    # eos position is always 0
+    one_hot = tf.concat([tf.zeros_like(one_hot[:, :1]), one_hot[:, 1:]], axis=1)
+    # one hot shape: (batch_size, vocab_size, 1)
+    one_hot = tf.squeeze(one_hot, axis=-1)
+    # one hot shape: (batch_size, vocab_size)
     return one_hot
-
 
 def main(args):
     where_to_save = os.path.join(args.save_dir, args.project_name, args.model_name)
@@ -96,7 +94,7 @@ def main(args):
     # model.load_state_dict(torch.load(model_path, map_location=map_loc))
     model.load_weights(model_path)
 
-    model.eval()
+    # model.eval()
     results_dict = {'recipes': {}, 'ingrs': {}, 'ingr_iou': {}}
     captions = {}
     iou = []
@@ -105,7 +103,7 @@ def main(args):
     n_rep, th = 0, 0.3
 
     for i, (img_inputs, true_caps_batch, ingr_gt, imgid, impath) in tqdm(enumerate(data_loader)):
-        true_caps_shift = true_caps_batch.clone()[:, 1:].contiguous()
+        true_caps_shift = tf.identity(true_caps_batch[:, 1:])
         true_ingrs = ingr_gt if args.use_true_ingrs else None
         for gens in range(args.numgens):
             if args.get_perplexity:
@@ -141,7 +139,7 @@ def main(args):
 
                 if not args.ingrs_only:
                     sampled_ids_batch = outputs['recipe_ids']
-                    sampled_ids_batch = sampled_ids_batch.cpu().detach().numpy()
+                    sampled_ids_batch = tf.stop_gradient(sampled_ids_batch).numpy()
 
                     for j, sampled_ids in enumerate(sampled_ids_batch):
                         score = compute_score(sampled_ids)

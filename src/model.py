@@ -3,31 +3,32 @@ from modules.encoder import EncoderCNN, EncoderLabels
 from modules.transformer_decoder import DecoderTransformer
 from modules.multihead_attention import MultiheadAttention
 from utils.metrics import softIoU, MaskedCrossEntropyCriterion
+import numpy as np
 
 # NOTE: Replaced torch check for cuda
 device = tf.device('/GPU:0' if tf.config.experimental.list_physical_devices('GPU') else '/CPU:0')
 
 def label2onehot(labels, pad_value):
-
     # input labels to one hot vector
-    inp_ = tf.expand_dims(labels, 2)
-    # one_hot = torch.FloatTensor(labels.size(0), labels.size(1), pad_value + 1).zero_().to(device)
-    one_hot = tf.zeros((labels.shape[0], labels.shape[1], pad_value + 1))
-    one_hot.scatter_(2, inp_, 1)
-    one_hot, _ = one_hot.max(dim=1)
+    inp_ = tf.expand_dims(labels, axis=-1)
+    one_hot = tf.one_hot(inp_, depth=pad_value + 1, axis=2)
+    one_hot = tf.reduce_max(one_hot, axis=1)
     # remove pad position
     one_hot = one_hot[:, :-1]
     # eos position is always 0
-    one_hot[:, 0] = 0
-
+    one_hot = tf.concat([tf.zeros_like(one_hot[:, :1]), one_hot[:, 1:]], axis=1)
+    # one hot shape: (batch_size, vocab_size, 1)
+    one_hot = tf.squeeze(one_hot, axis=-1)
+    # one hot shape: (batch_size, vocab_size)
     return one_hot
+
 
 def mask_from_eos(ids, eos_value, mult_before=True):
     # mask = torch.ones(ids,)).to(device).byte()
     # mask_aux = torch.ones(ids.size(0)).to(device).byte()
 
-    mask = tf.ones_like(ids)
-    mask_aux = tf.ones((ids.shape[0]))
+    mask = np.ones(ids.shape)
+    mask_aux = np.ones(ids.shape[0])
 
     # find eos in ingredient prediction
     for idx in range(tf.shape(ids)[1]):
@@ -36,11 +37,11 @@ def mask_from_eos(ids, eos_value, mult_before=True):
             continue
         if mult_before:
             mask[:, idx] = mask[:, idx] * mask_aux
-            mask_aux = mask_aux * (ids[:, idx] != eos_value)
+            mask_aux = mask_aux * (ids[:, idx] != eos_value).numpy()
         else:
-            mask_aux = mask_aux * (ids[:, idx] != eos_value)
+            mask_aux = mask_aux * (ids[:, idx] != eos_value).numpy()
             mask[:, idx] = mask[:, idx] * mask_aux
-    return mask
+    return tf.convert_to_tensor(mask)
 
 def get_model(args, ingr_vocab_size, instrs_vocab_size):
 
@@ -53,7 +54,7 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
     decoder = DecoderTransformer(args.embed_size, instrs_vocab_size,
                                  dropout=args.dropout_decoder_r, seq_length=args.maxseqlen,
                                  num_instrs=args.maxnuminstrs,
-                                 attention_nheads=args.n_att, num_layers=args.transf_layers,
+                                 attention_nheads=1, num_layers=1,
                                  normalize_before=True,
                                  normalize_inputs=False,
                                  last_ln=False,
@@ -61,14 +62,27 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
 
     ingr_decoder = DecoderTransformer(args.embed_size, ingr_vocab_size, dropout=args.dropout_decoder_i,
                                       seq_length=args.maxnumlabels,
-                                      num_instrs=1, attention_nheads=args.n_att_ingrs,
+                                      num_instrs=1, attention_nheads=1,
                                       pos_embeddings=False,
-                                      num_layers=args.transf_layers_ingrs,
+                                      num_layers=1,
                                       learned=False,
                                       normalize_before=True,
                                       normalize_inputs=True,
                                       last_ln=True,
                                       scale_embed_grad=False)
+    
+    decoder.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay),
+        loss='binary_crossentropy',
+        metrics=[softIoU]
+    )
+
+    ingr_decoder.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay),
+        loss='binary_crossentropy',
+        metrics=[softIoU]
+    )
+
     # recipe loss
     criterion = MaskedCrossEntropyCriterion(ignore_index=[instrs_vocab_size-1], reduce=False)
 
@@ -82,6 +96,14 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                 pad_value=ingr_vocab_size-1,
                                 ingrs_only=args.ingrs_only, recipe_only=args.recipe_only,
                                 label_smoothing=args.label_smoothing_ingr)
+    
+    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay)
+    
+    model.compile(
+        optimizer=optimizer,
+        loss='binary_crossentropy',
+        metrics=[softIoU]
+    )
 
     return model
 
@@ -106,32 +128,45 @@ class InverseCookingModel(tf.keras.Model):
         self.label_smoothing = label_smoothing
 
     # Changed to a more familiar 'call' function, instead of 'forward'
-    def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False):
+    def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False, training = True):
+        print("Training flag in call:", training)
         if sample:
-            return self.sample(img_inputs, greedy=True)
-
+            return self.sample(img_inputs, greedy=True, training = training)
         targets = captions[:, 1:]
         targets = tf.reshape(targets, [-1])
 
-        img_features = self.image_encoder(img_inputs, keep_cnn_gradients)
+        # print("img_inputs in image encoder", img_inputs)
+        img_features = self.image_encoder(img_inputs, keep_cnn_gradients=keep_cnn_gradients)
+        # print("image features shape out of encoder", img_features.shape)
 
         losses = {}
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
         target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value)
+        # print("pad value", self.pad_value)
+        # print("target ingrs", target_ingrs)
+        # print("target one_hot", target_one_hot)
+        # print("smooth (?) target one_hot", target_one_hot_smooth)
 
         # ingredient prediction
         if not self.recipe_only:
-            target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
-            target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / tf.shape(target_one_hot_smooth)[-1]
+
+            # mask = tf.cast(target_one_hot_smooth == 1, dtype=tf.float32)
+            # target_one_hot_smooth = mask * (1 - self.label_smoothing) + (1 - mask) * target_one_hot_smooth
+
+            target_one_hot_smooth = tf.where(target_one_hot_smooth == 0,
+                                 tf.cast(self.label_smoothing / tf.cast(tf.shape(target_one_hot_smooth)[-1], dtype=tf.float32), dtype=tf.float32),
+                                 1-self.label_smoothing)
+            # target_one_hot_smooth[target_one_hot_smooth == 1] = (1-self.label_smoothing)
+            # target_one_hot_smooth[target_one_hot_smooth == 0] = self.label_smoothing / tf.shape(target_one_hot_smooth)[-1]
 
             # decode ingredients with transformer
             # autoregressive mode for ingredient decoder
             ingr_ids, ingr_logits = self.ingredient_decoder.sample(None, None, greedy=True,
                                                                    temperature=1.0, img_features=img_features,
-                                                                   first_token_value=0, replacement=False)
+                                                                   first_token_value=0, replacement=False, training = training)
 
             # NOTE: torch.nn.functional.softmax -> tf.nn.softmax
-            ingr_logits = tf.nn.softmax(ingr_logits, dim=-1)
+            ingr_logits = tf.nn.softmax(ingr_logits, axis=-1)
 
             # find idxs for eos ingredient
             # eos probability is the one assigned to the first position of the softmax
@@ -143,17 +178,20 @@ class InverseCookingModel(tf.keras.Model):
 
             # select transformer steps to pool from
             mask_perminv = mask_from_eos(target_ingrs, eos_value=0, mult_before=False)
-            ingr_probs = ingr_logits * tf.expand_dim(tf.cast(mask_perminv, tf.float32), axis=-1)
+            ingr_probs = ingr_logits * tf.expand_dims(tf.cast(mask_perminv, tf.float32), axis=-1)
 
             # NOTE: Replaced torch.max with tf.reduce_max
-            ingr_probs = tf.reduce_max(ingr_probs, dim=1)
+            ingr_probs = tf.reduce_max(ingr_probs, axis=1)
 
             # ignore predicted ingredients after eos in ground truth
-            ingr_ids[mask_perminv == 0] = self.pad_value
+            ingr_ids = tf.where(mask_perminv == 0,
+                                self.pad_value,
+                                ingr_ids)
 
             ingr_loss = self.crit_ingr(ingr_probs, target_one_hot_smooth)
+
             # NOTE: Replaced torch.mean with tf.reduce_mean
-            ingr_loss = tf.reduce_mean(ingr_loss, dim=-1)
+            ingr_loss = tf.math.reduce_mean(ingr_loss)
 
             losses['ingr_loss'] = ingr_loss
 
@@ -198,18 +236,19 @@ class InverseCookingModel(tf.keras.Model):
 
         target_ingr_mask = tf.expand_dims(tf.cast(target_ingr_mask, tf.float32), axis=1)
 
-        outputs, ids = self.recipe_decoder(target_ingr_feats, target_ingr_mask, captions, img_features)
+        outputs, ids = self.recipe_decoder(target_ingr_feats, target_ingr_mask, captions, img_features, training=training)
 
         outputs = outputs[:, :-1, :]
-        outputs = outputs.view(tf.shape(outputs)[0] * tf.shape(outputs)[1], -1)
+        outputs = tf.reshape(outputs, [tf.shape(outputs)
+        [0] * tf.shape(outputs)[1], -1])
 
-        loss = self.crit(outputs, targets)
+        loss = self.crit(outputs, targets) # MaskedCrossEntropyCriterion takes outputs, then targets
 
         losses['recipe_loss'] = loss
 
         return losses
     
-    def sample(self, img_inputs, greedy=True, temperature=1.0, beam=-1, true_ingrs=None):
+    def sample(self, img_inputs, greedy=True, temperature=1.0, beam=-1, true_ingrs=None, training = False):
 
         outputs = dict()
 
@@ -219,7 +258,7 @@ class InverseCookingModel(tf.keras.Model):
             ingr_ids, ingr_probs = self.ingredient_decoder.sample(None, None, greedy=True, temperature=temperature,
                                                                   beam=-1,
                                                                   img_features=img_features, first_token_value=0,
-                                                                  replacement=False)
+                                                                  replacement=False, training=training)
 
             # mask ingredients after finding eos
             sample_mask = mask_from_eos(ingr_ids, eos_value=0, mult_before=False)
