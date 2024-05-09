@@ -114,6 +114,26 @@ class SinusoidalPositionalEmbedding(tf.keras.layers.Layer):
     def max_positions(self):
         """Maximum number of supported positions."""
         return int(1e5)  # an arbitrary large number
+    
+
+# Layer helpers
+
+def Embedding(num_embeddings, embedding_dim, padding_idx):
+    m = keras.layers.Embedding(input_dim=num_embeddings, output_dim=embedding_dim, padding_idx=padding_idx)
+    weights = tf.random.normal(shape=(num_embeddings, embedding_dim), mean=0.0, stddev=embedding_dim ** -0.5)
+    weights = tf.tensor_scatter_nd_update(weights, tf.constant([[padding_idx]]), tf.zeros((1, embedding_dim)))
+    m.set_weights([weights])
+    return m
+
+def PositionalEmbedding(num_embeddings, embedding_dim, padding_idx, left_pad, learned=False):
+    if learned:
+        m = LearnedPositionalEmbedding(num_embeddings, embedding_dim, padding_idx, left_pad)
+        weights = tf.random.normal(shape=(num_embeddings, embedding_dim), mean=0.0, stddev=embedding_dim ** -0.5)
+        weights = tf.tensor_scatter_nd_update(weights, tf.constant([[padding_idx]]), tf.zeros((1, embedding_dim)))
+        m.set_weights([weights])
+    else:
+        m = SinusoidalPositionalEmbedding(embedding_dim, padding_idx, left_pad, num_embeddings)
+    return m
 
 class TransformerDecoderLayer(tf.keras.layers.Layer):
     """Decoder layer block."""
@@ -144,8 +164,8 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
             dropout=dropout
         )
 
-        self.fc1 = keras.layers.Dense(self.embed_dim, activation=None)
-        self.fc2 = keras.layers.Dense(self.embed_dim, activation=None)
+        self.fc1 = keras.layers.Dense(units=self.embed_dim,kernel_initializer='glorot_uniform', bias_initializer='zeros')
+        self.fc2 = keras.layers.Dense(units=self.embed_dim,kernel_initializer='glorot_uniform', bias_initializer='zeros')
         self.layer_norms = [keras.layers.LayerNormalization(epsilon=1e-5) for i in range(3)]
         self.dropout_layer = keras.layers.Dropout(rate=self.dropout)
 
@@ -241,20 +261,25 @@ class DecoderTransformer(tf.keras.Model):
         super(DecoderTransformer, self).__init__()
         print(num_layers, "num_layers")
         self.dropout = dropout
+        self.dropout_layer = keras.layers.Dropout(self.dropout)
         self.seq_length = seq_length * num_instrs
-        self.embed_tokens = tf.keras.layers.Embedding(vocab_size, embed_size, embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5), name="decoder_transformer_embed_tokens")
-        self.final_ln = tf.keras.layers.LayerNormalization(name='final_layer_norm_decoder_transformer')
+        self.embed_tokens = keras.layers.Embedding(
+            input_dim=vocab_size, 
+            output_dim=embed_size, 
+            embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=embed_size**-0.5),
+            name="decoder_transformer_embed_tokens")
+        self.final_ln = keras.layers.LayerNormalization(epsilon=1e-5, name='final_layer_norm_decoder_transformer')
         if pos_embeddings:
             self.embed_positions = PositionalEmbedding(1024, embed_size, padding_idx=0, left_pad=False, learned=learned)
         else:
             self.embed_positions = None
         self.normalize_inputs = normalize_inputs
         if self.normalize_inputs:
-            self.layer_norms_in = [tf.keras.layers.LayerNormalization(epsilon=1e-5) for i in range(3)]
+            self.layer_norms_in = [keras.layers.LayerNormalization(epsilon=1e-5) for i in range(3)]
 
         self.embed_scale = math.sqrt(embed_size)
         self.td_layers = [TransformerDecoderLayer(embed_size, attention_nheads, dropout, normalize_before, last_ln) for _ in range(num_layers)]
-        self.linear = tf.keras.layers.Dense(vocab_size-1)
+        self.linear = keras.layers.Dense(units=vocab_size-1,kernel_initializer='glorot_uniform', bias_initializer='zeros')
 
     def call(self, ingr_features, ingr_mask, captions, img_features, incremental_state=None, training = False):
         if ingr_features is not None:
@@ -276,31 +301,24 @@ class DecoderTransformer(tf.keras.Model):
 
         # embed positions
         if self.embed_positions is not None:
-            positions = self.embed_positions(captions, incremental_state=incremental_state)
-        if incremental_state is not None:
-            if self.embed_positions is not None:
-                positions = positions[:, -1:]
-            captions = captions[:, -1:]
+            positions = self.embed_positions(captions)
 
         # embed tokens and positions
         x = self.embed_scale * self.embed_tokens(captions)
-
-
         if self.embed_positions is not None:
             x += positions
 
         if self.normalize_inputs:
             x = self.layer_norms_in[2](x)
 
-
-        x = tf.keras.layers.Dropout(self.dropout)(x, training=training)
+        x = self.dropout_layer(x, training=training)
 
         # B x T x C -> T x B x C
         # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
         # x = tf.transpose(x, perm=[1, 0, 2])
         for p, layer in enumerate(self.td_layers):
-            print (layer)
-            x  = layer(
+            print("Transformer Layer", p)
+            x = layer(
                 x,
                 ingr_features=ingr_features,
                 ingr_mask=ingr_mask,
@@ -311,7 +329,6 @@ class DecoderTransformer(tf.keras.Model):
         
         # T x B x C -> B x T x C
         # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
-        #TODO:
         # x = tf.transpose(x, perm=[1, 0, 2])
         x = self.linear(x)
         predicted = tf.argmax(x, axis=-1)
@@ -472,32 +489,3 @@ class DecoderTransformer(tf.keras.Model):
             if 'decoder.embed_positions._float_tensor' not in state_dict:
                 state_dict['decoder.embed_positions._float_tensor'] = tf.zeros([])
         return state_dict
-
-
-
-def Embedding(num_embeddings, embedding_dim, padding_idx, ):
-    m = tf.keras.layers.Embedding(input_dim=num_embeddings, output_dim=embedding_dim, padding_idx=padding_idx)
-    weights = tf.random.normal(shape=(num_embeddings, embedding_dim), mean=0.0, stddev=embedding_dim ** -0.5)
-    weights = tf.tensor_scatter_nd_update(weights, tf.constant([[padding_idx]]), tf.zeros((1, embedding_dim)))
-    m.set_weights([weights])
-    return m
-
-
-def LayerNorm(embedding_dim):
-    m = tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-5)
-    return m
-
-
-def Linear(in_features, out_features, bias=True):
-    return tf.keras.layers.Dense(units=out_features, use_bias=bias, kernel_initializer='glorot_uniform', bias_initializer='zeros')
-
-
-def PositionalEmbedding(num_embeddings, embedding_dim, padding_idx, left_pad, learned=False):
-    if learned:
-        m = LearnedPositionalEmbedding(num_embeddings, embedding_dim, padding_idx, left_pad)
-        weights = tf.random.normal(shape=(num_embeddings, embedding_dim), mean=0.0, stddev=embedding_dim ** -0.5)
-        weights = tf.tensor_scatter_nd_update(weights, tf.constant([[padding_idx]]), tf.zeros((1, embedding_dim)))
-        m.set_weights([weights])
-    else:
-        m = SinusoidalPositionalEmbedding(embedding_dim, padding_idx, left_pad, num_embeddings)
-    return m
