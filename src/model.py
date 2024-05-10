@@ -105,9 +105,11 @@ class InverseCookingModel(tf.keras.Model):
         self.recipe_only = recipe_only
         self.crit_eos = crit_eos
         self.label_smoothing = label_smoothing
+        self.training_losses = {}
+        self.validation_losses = {}
 
     # Changed to a more familiar 'call' function, instead of 'forward'
-    def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False, training = True):
+    def call(self, img_inputs, captions, target_ingrs, losses=None, sample=False, keep_cnn_gradients=False, training = True):
         # print("Training flag in call:", training)
         if sample:
             return self.sample(img_inputs, greedy=True, training = training)
@@ -118,7 +120,9 @@ class InverseCookingModel(tf.keras.Model):
         img_features = self.image_encoder(img_inputs, keep_cnn_gradients=keep_cnn_gradients)
         # print("image features shape out of encoder", img_features.shape)
 
-        losses = {}
+        if losses is None:
+            losses = {}
+
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
         target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value)
         # print("pad value", self.pad_value)
@@ -221,9 +225,15 @@ class InverseCookingModel(tf.keras.Model):
         outputs = tf.reshape(outputs, [tf.shape(outputs)
         [0] * tf.shape(outputs)[1], -1])
 
-        
+        loss = self.crit(outputs, targets)
 
-        # losses['recipe_loss'] = loss
+        # print("recipe loss shape", loss.shape)
+        losses['recipe_loss'] = loss
+
+        if training:
+            self.training_losses = losses
+        if sample or not training:
+            self.validation_losses = losses
 
         return outputs
     

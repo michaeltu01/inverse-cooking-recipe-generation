@@ -40,8 +40,11 @@ def MaskedCrossEntropyCriterion(outputs, targets, ignore_index=[-100], reduce=No
 
     # pytorch: nll_loss = -lprobs.gather(dim=-1, index=targets.unsqueeze(1))
     indices = tf.cast(tf.expand_dims(targets, 1), tf.int32)
-    print(indices)
-    nll_loss = -tf.gather(lprobs, indices=indices, axis=-1)
+    indices = tf.concat([tf.expand_dims(tf.range(0, lprobs.shape[0]), -1), indices], axis=-1)
+    print("probs shape", lprobs.shape)
+    print("MCEC indices", indices)
+    nll_loss = -tf.gather_nd(lprobs, indices=indices)
+    print("nll_loss", nll_loss)
     if reduce:
         nll_loss = tf.reduce_sum(nll_loss)
 
