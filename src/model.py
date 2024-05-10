@@ -70,18 +70,6 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                       normalize_inputs=True,
                                       last_ln=True,
                                       scale_embed_grad=False)
-    
-    decoder.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay),
-        loss='binary_crossentropy',
-        metrics=[softIoU]
-    )
-
-    ingr_decoder.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay),
-        loss='binary_crossentropy',
-        metrics=[softIoU]
-    )
 
     # recipe loss
     criterion = MaskedCrossEntropyCriterion(ignore_index=[instrs_vocab_size-1], reduce=False)
@@ -96,15 +84,6 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                 pad_value=ingr_vocab_size-1,
                                 ingrs_only=args.ingrs_only, recipe_only=args.recipe_only,
                                 label_smoothing=args.label_smoothing_ingr)
-    
-    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay)
-    
-    model.compile(
-        optimizer=optimizer,
-        loss='binary_crossentropy',
-        metrics=[softIoU]
-    )
-
     return model
 
 class InverseCookingModel(tf.keras.Model):
