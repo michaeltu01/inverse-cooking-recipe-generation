@@ -4,26 +4,48 @@ import math
 import numpy as np
 import tensorflow as tf
 
-class MaskedCrossEntropyCriterion(tf.keras.losses.Loss):
-    def __init__(self, ignore_index=[-100], reduce=None):
-        super(MaskedCrossEntropyCriterion, self).__init__()
-        self.padding_idx = ignore_index
-        self.reduce = reduce
+# class MaskedCrossEntropyCriterion(tf.keras.losses.Loss):
+#     def __init__(self, ignore_index=[-100], reduce=None):
+#         super(MaskedCrossEntropyCriterion, self).__init__()
+#         self.padding_idx = ignore_index
+#         self.reduce = reduce
 
-    def call(self, outputs, targets):
-        lprobs = tf.nn.log_softmax(outputs, axis=-1)
-        lprobs = tf.reshape(lprobs, [-1, lprobs.size(-1)])
+#     def call(self, outputs, targets):
+#         lprobs = tf.nn.log_softmax(outputs, axis=-1)
+#         lprobs = tf.reshape(lprobs, [-1, lprobs.shape[-1]])
 
-        for idx in self.padding_idx:
-            # remove padding idx from targets to allow gathering without error (padded entries will be suppressed later)
-            targets[targets == idx] = 0
+#         for idx in self.padding_idx:
+#             # remove padding idx from targets to allow gathering without error (padded entries will be suppressed later)
+#             # targets[targets == idx] = 0
+#             targets = tf.where(targets == idx, 0, targets)
 
-        # pytorch: nll_loss = -lprobs.gather(dim=-1, index=targets.unsqueeze(1))
-        nll_loss = -tf.gather(lprobs, indices=tf.expand_dims(targets, 1), axis=-1)
-        if self.reduce:
-            nll_loss = tf.reduce_sum(nll_loss)
+#         # pytorch: nll_loss = -lprobs.gather(dim=-1, index=targets.unsqueeze(1))
+#         indices = tf.cast(tf.expand_dims(targets, 1), tf.int32)
+#         print(indices)
+#         nll_loss = -tf.gather(lprobs, indices=indices, axis=-1)
+#         if self.reduce:
+#             nll_loss = tf.reduce_sum(nll_loss)
 
-        return tf.squeeze(nll_loss)
+#         return tf.squeeze(nll_loss)
+
+def MaskedCrossEntropyCriterion(outputs, targets, ignore_index=[-100], reduce=None):
+    padding_idx = ignore_index
+    lprobs = tf.nn.log_softmax(outputs, axis=-1)
+    lprobs = tf.reshape(lprobs, [-1, lprobs.shape[-1]])
+
+    for idx in padding_idx:
+        # remove padding idx from targets to allow gathering without error (padded entries will be suppressed later)
+        # targets[targets == idx] = 0
+        targets = tf.where(targets == idx, 0, targets)
+
+    # pytorch: nll_loss = -lprobs.gather(dim=-1, index=targets.unsqueeze(1))
+    indices = tf.cast(tf.expand_dims(targets, 1), tf.int32)
+    print(indices)
+    nll_loss = -tf.gather(lprobs, indices=indices, axis=-1)
+    if reduce:
+        nll_loss = tf.reduce_sum(nll_loss)
+
+    return tf.squeeze(nll_loss)
 
 
 def softIoU(out, target, e=1e-6, sum_axis=1):

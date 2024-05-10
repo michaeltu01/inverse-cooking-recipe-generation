@@ -14,7 +14,7 @@ import time
 from utils.tb_visualizer import Visualizer
 # import tensorflow_addons as tfa
 from model import mask_from_eos, label2onehot
-from utils.metrics import softIoU, compute_metrics, update_error_types
+from utils.metrics import softIoU, compute_metrics, update_error_types, MaskedCrossEntropyCriterion
 import random
 
 def make_dir(d):
@@ -68,7 +68,7 @@ def main(args):
                                                         drop_last=True, max_num_samples=max_num_samples,
                                                         use_lmdb=args.use_lmdb, suff=args.suff)
 
-    print("split", split)
+    # print("split", split)
     ingr_vocab_size = datasets[split].get_ingrs_vocab_size()
     instrs_vocab_size = datasets[split].get_instrs_vocab_size()
 
@@ -77,7 +77,7 @@ def main(args):
     optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate)
     model.compile(
         optimizer=optimizer,
-        loss='binary_crossentropy',
+        loss=lambda outputs, targets: MaskedCrossEntropyCriterion(outputs, targets, ignore_index=[instrs_vocab_size-1], reduce=False),
         metrics=[softIoU]
     )
 
@@ -108,7 +108,7 @@ def main(args):
 
         start = time.time()
         total_loss = 0
-        print(f"Epoch {epoch}")
+        # print(f"Epoch {epoch}")
         print()
         for i in range(total_step):
 
@@ -118,17 +118,26 @@ def main(args):
             captions = tf.convert_to_tensor(captions.numpy())
             ingr_gt = tf.convert_to_tensor(ingr_gt.numpy())
 
-            with tf.GradientTape() as tape:
-                tape.watch(model.trainable_variables)
-                losses = model(img_inputs, captions, ingr_gt, training=True)            
+            targets = captions[:, 1:]
+            targets = tf.reshape(targets, [-1])
 
-            gradients = tape.gradient(losses['iou'], model.trainable_variables)
+            with tf.GradientTape() as tape:
+                # for train_var in model.trainable_variables:
+                #     print(train_var)
+                #     tape.watch(train_var)
+                # tape.watch(model.trainable_variables)
+                outputs = model(img_inputs, captions, ingr_gt, training=True)
+                loss = model.loss(outputs, targets)
+
+            gradients = tape.gradient(loss, model.trainable_variables)
             for grad, var in zip(gradients, model.trainable_variables):
                 print(f"{var.name}, grad mean: {tf.reduce_mean(grad) if grad is not None else 'No gradient'}")
             model.optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
-            total_loss += losses['iou']
-            print(f"Batch: {i}; Loss: {losses['iou']}")
+            print("loss shape", loss.shape)
+            avg_batch_loss = tf.reduce_mean(loss)
+            total_loss += avg_batch_loss
+            print(f"Batch: {i}; Loss: {avg_batch_loss}")
         print(f"Epoch: {epoch}; Average loss: {total_loss / total_step}")
 
     if args.tensorboard:

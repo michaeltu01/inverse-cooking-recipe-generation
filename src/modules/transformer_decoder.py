@@ -30,7 +30,7 @@ def make_positions(tensor, padding_idx, left_pad):
     return out
 
 
-class LearnedPositionalEmbedding(tf.keras.layers.Layer):
+class LearnedPositionalEmbedding(tf.keras.Layer):
     """This module learns positional embeddings up to a fixed maximum size.
     Padding symbols are ignored, but it is necessary to specify whether padding
     is added on the left side (left_pad=True) or right side (left_pad=False).
@@ -57,7 +57,7 @@ class LearnedPositionalEmbedding(tf.keras.layers.Layer):
         """Maximum number of supported positions."""
         return self.num_embeddings - self.padding_idx - 1
 
-class SinusoidalPositionalEmbedding(tf.keras.layers.Layer):
+class SinusoidalPositionalEmbedding(tf.keras.Layer):
     """This module produces sinusoidal positional embeddings of any length.
     Padding symbols are ignored, but it is necessary to specify whether padding
     is added on the left side (left_pad=True) or right side (left_pad=False).
@@ -177,7 +177,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         # self attention
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
-        print("x shape", x.shape)
+        # print("x shape", x.shape)
         x = self.self_attn(
             query=x,
             key=x,
@@ -195,7 +195,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         if ingr_features is None:
             img_features = tf.transpose(img_features, perm= [1, 2, 0])
             # NOTE: img_features shape should be (batch_size, img_features, embed_size)
-            print("img inputs shape", img_features.shape)
+            # print("img inputs shape", img_features.shape)
             # img features here is populated with numbers
             x = self.cond_attn(query=x,
                     key=img_features,
@@ -206,7 +206,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
 
         elif img_features is None:
             # NOTE: ingr_features shape should be (batch_size, seq_len, embed_size)
-            print("img inputs shape", img_features.shape)
+            # print("img inputs shape", img_features.shape)
             x = self.cond_attn(query=x,
                     key=ingr_features,
                     value=ingr_features,
@@ -216,8 +216,9 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         else:
             # attention on concatenation of encoder_out and encoder_aux, query self attn (x)
             img_features = tf.transpose(img_features, perm=[1, 2, 0])
+            ingr_features = tf.transpose(ingr_features, perm=[1,0,2])
             # NOTE: img_features shape should be (batch_size, img_features, embed_size)
-            print("img inputs shape", img_features.shape)
+            # print("img inputs shape", img_features.shape)
             kv = tf.concat((img_features, ingr_features), axis=1)
             # mask = tf.concat([tf.zeros((img_features.shape[1], img_features.shape[0]), dtype=tf.int32), tf.cast(ingr_mask, tf.int32)], axis=1)
             x = self.cond_attn(query=x,
@@ -259,7 +260,7 @@ class DecoderTransformer(tf.keras.Model):
                  attention_nheads=16, pos_embeddings=True, num_layers=16, learned=True, normalize_before=True,
                  normalize_inputs=False, last_ln=False, scale_embed_grad=False):
         super(DecoderTransformer, self).__init__()
-        print(num_layers, "num_layers")
+        # print(num_layers, "num_layers")
         self.dropout = dropout
         self.dropout_layer = keras.layers.Dropout(self.dropout)
         self.seq_length = seq_length * num_instrs
@@ -301,7 +302,11 @@ class DecoderTransformer(tf.keras.Model):
 
         # embed positions
         if self.embed_positions is not None:
-            positions = self.embed_positions(captions)
+            positions = self.embed_positions(captions, incremental_state=incremental_state)
+        if incremental_state is not None:
+            if self.embed_positions is not None:
+                positions = positions[:, -1:]
+            captions = captions[:, -1:]
 
         # embed tokens and positions
         x = self.embed_scale * self.embed_tokens(captions)
@@ -314,10 +319,10 @@ class DecoderTransformer(tf.keras.Model):
         x = self.dropout_layer(x, training=training)
 
         # B x T x C -> T x B x C
-        # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
-        # x = tf.transpose(x, perm=[1, 0, 2])
+        x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
+        x = tf.transpose(x, perm=[1, 0, 2])
         for p, layer in enumerate(self.td_layers):
-            print("Transformer Layer", p)
+            # print("Transformer Layer", p)
             x = layer(
                 x,
                 ingr_features=ingr_features,
@@ -328,8 +333,8 @@ class DecoderTransformer(tf.keras.Model):
             )
         
         # T x B x C -> B x T x C
-        # x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
-        # x = tf.transpose(x, perm=[1, 0, 2])
+        x = tf.transpose(x, perm=[1, 0] + list(range(2, tf.rank(x))))
+        x = tf.transpose(x, perm=[1, 0, 2])
         x = self.linear(x)
         predicted = tf.argmax(x, axis=-1)
 
@@ -338,7 +343,7 @@ class DecoderTransformer(tf.keras.Model):
     def sample(self, ingr_features, ingr_mask, greedy=True, temperature=1.0, beam=-1,
                img_features=None, first_token_value=0,
                replacement=True, last_token_value=0, training = False):
-
+        
         incremental_state = {}
 
         # create dummy previous word
@@ -346,6 +351,7 @@ class DecoderTransformer(tf.keras.Model):
 
         if beam != -1:
             if fs == 1:
+                # print('beam search')
                 return self.sample_beam(ingr_features, ingr_mask, beam, img_features, first_token_value,
                                         replacement, last_token_value, training = training)
             else:
@@ -363,7 +369,11 @@ class DecoderTransformer(tf.keras.Model):
             caption_ids = [tf.cast(id, tf.int32) for id in sampled_ids]
             captions = tf.stack(caption_ids, axis=1)
 
+            # print("incremental state", incremental_state)
+            # print("captions", captions)
+            # print("caption ids", caption_ids)
             outputs, _ = self.call(ingr_features=ingr_features, ingr_mask=ingr_mask, captions=captions, img_features=img_features, incremental_state=incremental_state, training=training)
+            # print("outputs shape", outputs.shape)
             outputs = tf.squeeze(outputs, axis=1)
             if not replacement:
                 # predicted mask

@@ -72,7 +72,7 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                       scale_embed_grad=False)
 
     # recipe loss
-    criterion = MaskedCrossEntropyCriterion(ignore_index=[instrs_vocab_size-1], reduce=False)
+    criterion = lambda outputs, targets: MaskedCrossEntropyCriterion(outputs, targets, ignore_index=[instrs_vocab_size-1], reduce=False)
 
     # ingredients loss
     # NOTE: Replaced torch.nn.BCELoss -> tf.keras.losses.BinaryCrossentropy
@@ -108,7 +108,7 @@ class InverseCookingModel(tf.keras.Model):
 
     # Changed to a more familiar 'call' function, instead of 'forward'
     def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False, training = True):
-        print("Training flag in call:", training)
+        # print("Training flag in call:", training)
         if sample:
             return self.sample(img_inputs, greedy=True, training = training)
         targets = captions[:, 1:]
@@ -221,11 +221,11 @@ class InverseCookingModel(tf.keras.Model):
         outputs = tf.reshape(outputs, [tf.shape(outputs)
         [0] * tf.shape(outputs)[1], -1])
 
-        loss = self.crit(outputs, targets) # MaskedCrossEntropyCriterion takes outputs, then targets
+        
 
-        losses['recipe_loss'] = loss
+        # losses['recipe_loss'] = loss
 
-        return losses
+        return outputs
     
     def sample(self, img_inputs, greedy=True, temperature=1.0, beam=-1, true_ingrs=None, training = False):
 
