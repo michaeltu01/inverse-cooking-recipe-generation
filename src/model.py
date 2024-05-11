@@ -70,21 +70,9 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                       normalize_inputs=True,
                                       last_ln=True,
                                       scale_embed_grad=False)
-    
-    decoder.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay),
-        loss='binary_crossentropy',
-        metrics=[softIoU]
-    )
-
-    ingr_decoder.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay),
-        loss='binary_crossentropy',
-        metrics=[softIoU]
-    )
 
     # recipe loss
-    criterion = MaskedCrossEntropyCriterion(ignore_index=[instrs_vocab_size-1], reduce=False)
+    criterion = lambda outputs, targets: MaskedCrossEntropyCriterion(outputs, targets, ignore_index=[instrs_vocab_size-1], reduce=False)
 
     # ingredients loss
     # NOTE: Replaced torch.nn.BCELoss -> tf.keras.losses.BinaryCrossentropy
@@ -96,15 +84,6 @@ def get_model(args, ingr_vocab_size, instrs_vocab_size):
                                 pad_value=ingr_vocab_size-1,
                                 ingrs_only=args.ingrs_only, recipe_only=args.recipe_only,
                                 label_smoothing=args.label_smoothing_ingr)
-    
-    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate, weight_decay=args.weight_decay)
-    
-    model.compile(
-        optimizer=optimizer,
-        loss='binary_crossentropy',
-        metrics=[softIoU]
-    )
-
     return model
 
 class InverseCookingModel(tf.keras.Model):
@@ -126,10 +105,12 @@ class InverseCookingModel(tf.keras.Model):
         self.recipe_only = recipe_only
         self.crit_eos = crit_eos
         self.label_smoothing = label_smoothing
+        self.training_losses = {}
+        self.validation_losses = {}
 
     # Changed to a more familiar 'call' function, instead of 'forward'
-    def call(self, img_inputs, captions, target_ingrs, sample=False, keep_cnn_gradients=False, training = True):
-        print("Training flag in call:", training)
+    def call(self, img_inputs, captions, target_ingrs, losses=None, sample=False, keep_cnn_gradients=False, training = True):
+        # print("Training flag in call:", training)
         if sample:
             return self.sample(img_inputs, greedy=True, training = training)
         targets = captions[:, 1:]
@@ -139,7 +120,9 @@ class InverseCookingModel(tf.keras.Model):
         img_features = self.image_encoder(img_inputs, keep_cnn_gradients=keep_cnn_gradients)
         # print("image features shape out of encoder", img_features.shape)
 
-        losses = {}
+        if losses is None:
+            losses = {}
+
         target_one_hot = label2onehot(target_ingrs, self.pad_value)
         target_one_hot_smooth = label2onehot(target_ingrs, self.pad_value)
         # print("pad value", self.pad_value)
@@ -242,11 +225,17 @@ class InverseCookingModel(tf.keras.Model):
         outputs = tf.reshape(outputs, [tf.shape(outputs)
         [0] * tf.shape(outputs)[1], -1])
 
-        loss = self.crit(outputs, targets) # MaskedCrossEntropyCriterion takes outputs, then targets
+        loss = self.crit(outputs, targets)
 
+        # print("recipe loss shape", loss.shape)
         losses['recipe_loss'] = loss
 
-        return losses
+        if training:
+            self.training_losses = losses
+        if sample or not training:
+            self.validation_losses = losses
+
+        return outputs
     
     def sample(self, img_inputs, greedy=True, temperature=1.0, beam=-1, true_ingrs=None, training = False):
 
